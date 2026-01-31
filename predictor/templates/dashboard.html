@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Beat the Streak AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .score-high { color: #198754; font-weight: bold; }
+        .score-med { color: #fd7e14; }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container py-5">
+    <div class="row mb-4">
+        <div class="col text-center">
+            <h1 class="display-5 fw-bold">⚾ Beat the Streak AI</h1>
+            <p class="lead text-muted">Predicting hits for {{ pretty_date }}</p>
+        </div>
+    </div>
+
+    <div class="row justify-content-center mb-5">
+        <div class="col-md-4">
+            <form method="GET" class="card p-3 shadow-sm">
+                <label class="form-label fw-bold">Simulation Date:</label>
+                <div class="input-group">
+                    <input type="date" name="date" class="form-control" value="{{ selected_date }}">
+                    <button type="submit" class="btn btn-primary">Run Prediction</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4 border-success">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0">✅ The A-List (Safe Picks)</h5>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Player</th>
+                        <th>Team</th>
+                        <th>Matchup</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in a_list %}
+                    <tr>
+                        <td>
+                            <strong>{{ p.Name }}</strong><br>
+                            <small class="text-muted">{{ p.Pos }} / {{ p.Bats }}</small>
+                        </td>
+                        <td>{{ p.Team }}</td>
+                        <td>
+                            vs {{ p.Opponent }}<br>
+                            <small class="text-muted">Pitcher: {{ p.Probable_Pitcher }}</small>
+                        </td>
+                        <td class="fs-5 score-high">{{ p.Score }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="text-center py-3">No A-List candidates found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-warning">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0">⚠️ The B-List (Risks Detected)</h5>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Player</th>
+                        <th>Team</th>
+                        <th>Risk Factors</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in b_list %}
+                    <tr>
+                        <td>{{ p.Name }}</td>
+                        <td>{{ p.Team }}</td>
+                        <td class="text-danger">{{ p.Notes }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" class="text-center py-3">No risky candidates found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
