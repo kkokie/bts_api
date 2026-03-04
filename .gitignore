@@ -1,0 +1,19 @@
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Virtual Environment (Big folder, do not commit)
+venv/
+bin/
+lib/
+include/
+
+# IDE Settings
+.idea/
+.vscode/
+
+# Mac OS junk
+.DS_Store
+
+# Data (Optional: if you download huge CSVs, un-comment this to keep them local)
+# data/
