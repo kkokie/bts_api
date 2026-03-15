@@ -14,6 +14,14 @@
             font-weight: 500;
         }
         .bg-orange { background-color: #fd7e14 !important; color: #fff; }
+        .meta-chip {
+            font-size: 0.7rem;
+            padding: 1px 5px;
+            border-radius: 4px;
+            background: #e9ecef;
+            color: #495057;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -42,7 +50,7 @@
     <!-- A-List -->
     <div class="card shadow-sm mb-4 border-success">
         <div class="card-header bg-success text-white">
-            <h5 class="mb-0">✅ The A-List (Safe Picks)</h5>
+            <h5 class="mb-0">⚾ Our Model Suggests...</h5>
         </div>
         <div class="card-body p-0">
             <table class="table table-hover mb-0">
@@ -56,7 +64,10 @@
                     {% for p in a_list %}
                     <tr>
                         <td>
-                            {% if p.got_hit %}
+                            {% if p.lineup_confirmed == False %}
+                                <strong class="text-muted" style="text-decoration: line-through;">{{ p.name }}</strong>
+                                <small class="text-danger ms-1">not in lineup</small>
+                            {% elif p.got_hit %}
                                 <strong class="text-success">{{ p.name }}</strong>
                             {% elif p.got_hit is not None %}
                                 <strong class="text-danger">{{ p.name }}</strong>
@@ -65,25 +76,37 @@
                             {% endif %}
                             <span class="text-muted fw-normal"> &mdash; {{ p.team }}</span>
                             <br>
-                            <small class="text-muted">
-                                Bats {{ p.bats }}
-                                {% if p.avg_batting_order %}&bull; Avg Order: {{ p.avg_batting_order }}{% endif %}
-                            </small>
+                            <small class="text-muted">Bats {{ p.bats }}</small>
+                            <span class="d-inline-flex gap-1 flex-wrap align-items-center ms-1">
+                                {% if p.avg_batting_order %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Average lineup position (last 7 days)">#{{ p.avg_batting_order }} lineup</span>{% endif %}
+                                {% if p.team_rank %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Team offensive rank by runs scored (last 7 days)">Rank #{{ p.team_rank }}</span>{% endif %}
+                                {% if p.park_factor %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Park factor — 100 is league average, higher means more hits">PF {{ p.park_factor }}</span>{% endif %}
+                                {% if p.hit_streak %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Consecutive games with at least one hit">{{ p.hit_streak }}G streak{{ p.fire_emojis }}</span>{% endif %}
+                            </span>
                         </td>
                         <td>
-                            vs {{ p.opponent }}<br>
+                            {% if p.is_home %}vs{% else %}@{% endif %} {{ p.opponent }}<br>
                             <small class="text-muted">
                                 {% if p.pitcher_hand %}[{{ p.pitcher_hand }}] {% endif %}{{ p.probable_pitcher }}
                                 {% if p.pitcher_era is not None %}
                                 &mdash; ERA: {{ p.pitcher_era }} / WHIP: {{ p.pitcher_whip }}
                                 {% endif %}
                             </small>
+                            {% if p.stadium %}
+                            <br>
+                            <small class="text-secondary">
+                                {{ p.stadium }}{% if p.game_time %} &mdash; {{ p.game_time }}{% endif %}
+                            </small>
+                            {% endif %}
                         </td>
                     </tr>
                     <tr class="factor-row">
                         <td colspan="2" class="pb-2">
-                            <div class="factor-badges d-flex flex-wrap gap-1"
-                                 data-breakdown="{{ p.score_breakdown }}"></div>
+                            <div class="d-flex justify-content-between align-items-start gap-2"
+                                 data-breakdown="{{ p.score_breakdown }}">
+                                <div class="batter-badges d-flex flex-wrap gap-1 align-items-center"></div>
+                                <div class="pitcher-badges d-flex flex-wrap gap-1 align-items-center justify-content-end"></div>
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
@@ -94,70 +117,36 @@
         </div>
     </div>
 
-    <!-- B-List -->
-    <div class="card shadow-sm border-warning">
-        <div class="card-header bg-warning text-dark">
-            <h5 class="mb-0">⚠️ The B-List (Risks Detected)</h5>
-        </div>
-        <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Player</th>
-                        <th>Matchup</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for p in b_list %}
-                    <tr>
-                        <td>
-                            {% if p.got_hit %}
-                                <strong class="text-success">{{ p.name }}</strong>
-                            {% elif p.got_hit is not None %}
-                                <strong class="text-danger">{{ p.name }}</strong>
-                            {% else %}
-                                <strong>{{ p.name }}</strong>
-                            {% endif %}
-                            <span class="text-muted fw-normal"> &mdash; {{ p.team }}</span>
-                            <br>
-                            <small class="text-muted">
-                                Bats {{ p.bats }}
-                                {% if p.avg_batting_order %}&bull; Avg Order: {{ p.avg_batting_order }}{% endif %}
-                            </small>
-                            {% if p.notes %}
-                            <br>
-                            <small class="text-danger">&#9888; {{ p.notes }}</small>
-                            {% endif %}
-                        </td>
-                        <td>
-                            vs {{ p.opponent }}<br>
-                            <small class="text-muted">
-                                {% if p.pitcher_hand %}[{{ p.pitcher_hand }}] {% endif %}{{ p.probable_pitcher }}
-                                {% if p.pitcher_era is not None %}
-                                &mdash; ERA: {{ p.pitcher_era }} / WHIP: {{ p.pitcher_whip }}
-                                {% endif %}
-                            </small>
-                        </td>
-                    </tr>
-                    <tr class="factor-row">
-                        <td colspan="2" class="pb-2">
-                            <div class="factor-badges d-flex flex-wrap gap-1"
-                                 data-breakdown="{{ p.score_breakdown }}"></div>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="2" class="text-center py-3">No risky candidates found.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    var PITCHER_PREFIXES = ['P.H', 'P.ERA', 'P.BB', 'P.IP', 'BP'];
+    var SKIP_PREFIXES    = ['Team Rank', 'Lineup', 'Park'];
+
+    var TOOLTIPS = {
+        'H:':    'Projected hits per 7-game week. Higher = hotter bat.',
+        'K%':    'Strikeout rate last 7 days. Lower = better contact.',
+        'P.H':   'Hits allowed by opposing starter (last ~4 starts). Higher = easier matchup.',
+        'P.ERA': 'ERA of opposing starter (last ~4 starts). Higher = easier matchup.',
+        'P.BB':  'Walks issued by opposing starter (last ~4 starts). Higher = wilder pitcher.',
+        'P.IP':  'Innings pitched by opposing starter (last ~4 starts).',
+        'BP':    'Hits allowed by opponent\'s bullpen (last 15 days). Higher = weaker bullpen.',
+    };
+
+    function getTooltip(factor) {
+        for (var key in TOOLTIPS) {
+            if (factor.startsWith(key)) return TOOLTIPS[key];
+        }
+        return '';
+    }
+
+    function isPitcherBadge(factor) {
+        return PITCHER_PREFIXES.some(function(p) { return factor.startsWith(p); });
+    }
+
     function badgeClass(factor) {
-        if (factor.startsWith('BA')) {
+        if (factor.startsWith('H:')) {
             var m = factor.match(/([\+\-]?[\d.]+)σ/);
             if (m) {
                 var z = parseFloat(m[1]);
@@ -167,40 +156,70 @@
                 if (z >= -1) return 'bg-orange';
                 return 'bg-danger';
             }
-            return 'bg-secondary';
         }
 
         if (factor.startsWith('K%')) {
             var m = factor.match(/([\+\-]?[\d.]+)σ/);
             if (m) {
                 var z = parseFloat(m[1]);
-                // Lower K% = better, so invert: negative z is good
                 if (z <= -2) return 'bg-primary';
                 if (z <= -1) return 'bg-success';
                 if (z <=  0) return 'bg-warning text-dark';
                 if (z <=  1) return 'bg-orange';
                 return 'bg-danger';
             }
-            return 'bg-secondary';
         }
 
-        if (factor.startsWith('Team Rank')) return 'bg-secondary';
-
-        if (factor.startsWith('Lineup')) return 'bg-secondary';
+        // Pitcher stats — high z = pitcher is worse = good for batter
+        if (factor.startsWith('P.H') || factor.startsWith('P.ERA') || factor.startsWith('P.BB') || factor.startsWith('BP')) {
+            var m = factor.match(/([\+\-]?[\d.]+)σ/);
+            if (m) {
+                var z = parseFloat(m[1]);
+                if (z >= 2)  return 'bg-primary';
+                if (z >= 1)  return 'bg-success';
+                if (z >= 0)  return 'bg-warning text-dark';
+                if (z >= -1) return 'bg-orange';
+                return 'bg-danger';
+            }
+        }
 
         return 'bg-secondary';
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-        document.querySelectorAll('.factor-badges').forEach(function (el) {
-            var raw = el.getAttribute('data-breakdown');
+        document.querySelectorAll('[data-breakdown]').forEach(function (container) {
+            var raw = container.getAttribute('data-breakdown');
             if (!raw) return;
+
+            var batterDiv  = container.querySelector('.batter-badges');
+            var pitcherDiv = container.querySelector('.pitcher-badges');
+
             raw.split(' | ').filter(Boolean).forEach(function (factor) {
+                // Team Rank, Lineup, Park are shown as meta-chips — skip here
+                if (SKIP_PREFIXES.some(function(p) { return factor.startsWith(p); })) return;
+
                 var badge = document.createElement('span');
                 badge.className = 'badge ' + badgeClass(factor);
                 badge.textContent = factor;
-                el.appendChild(badge);
+
+                var tip = getTooltip(factor);
+                if (tip) {
+                    badge.setAttribute('data-bs-toggle', 'tooltip');
+                    badge.setAttribute('data-bs-placement', 'top');
+                    badge.setAttribute('title', tip);
+                }
+
+                if (isPitcherBadge(factor)) {
+                    pitcherDiv.appendChild(badge);
+                } else {
+                    batterDiv.appendChild(badge);
+                }
             });
+        });
+
+        // Init Bootstrap tooltips (badges + meta-chips)
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+            new bootstrap.Tooltip(el);
         });
     });
 </script>

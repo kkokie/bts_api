@@ -20,12 +20,23 @@ class Prediction(models.Model):
     avg_batting_order = models.FloatField(null=True, blank=True)
     notes = models.CharField(max_length=200, blank=True, default='')
     pitcher_hand = models.CharField(max_length=1, blank=True, default='')
-    score_breakdown = models.CharField(max_length=500, blank=True, default='')
+    score_breakdown = models.CharField(max_length=800, blank=True, default='')
     got_hit = models.BooleanField(null=True, blank=True, default=None)
+    stadium = models.CharField(max_length=100, blank=True, default='')
+    game_time = models.CharField(max_length=20, blank=True, default='')
+    park_factor = models.IntegerField(null=True, blank=True)
+    is_home = models.BooleanField(default=True)
+    team_rank = models.IntegerField(null=True, blank=True)
+    hit_streak = models.IntegerField(default=0)
+    lineup_confirmed = models.BooleanField(null=True, blank=True, default=None)
 
     class Meta:
         unique_together = ('date', 'name')
         ordering = ['-score']
+
+    @property
+    def fire_emojis(self):
+        return '🔥' * (self.hit_streak // 3)
 
     def __str__(self):
         return f"{self.date} | {self.list_type} | {self.name} ({self.score})"
@@ -46,6 +57,12 @@ class Prediction(models.Model):
                 notes=p['Notes'],
                 pitcher_hand=p.get('Pitcher_Hand', ''),
                 score_breakdown=p.get('Score_Breakdown', ''),
+                stadium=p.get('Stadium', ''),
+                game_time=p.get('Game_Time', ''),
+                park_factor=p.get('Park_Factor'),
+                is_home=p.get('Is_Home', True),
+                team_rank=p.get('Team_Rank'),
+                hit_streak=p.get('Hit_Streak', 0),
             )
             for p in a_list
         ] + [
@@ -59,6 +76,12 @@ class Prediction(models.Model):
                 notes=p['Notes'],
                 pitcher_hand=p.get('Pitcher_Hand', ''),
                 score_breakdown=p.get('Score_Breakdown', ''),
+                stadium=p.get('Stadium', ''),
+                game_time=p.get('Game_Time', ''),
+                park_factor=p.get('Park_Factor'),
+                is_home=p.get('Is_Home', True),
+                team_rank=p.get('Team_Rank'),
+                hit_streak=p.get('Hit_Streak', 0),
             )
             for p in b_list
         ]
