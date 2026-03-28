@@ -10,15 +10,43 @@ def scoring_guide(request):
     # Pre-compute the lineup bonus table so the template stays logic-free
     lineup_rows = []
     for pos in range(1, 10):
-        bonus = round(max(0.0, (9 - pos) / 8 * 10), 1)
+        bonus = round(max(0.0, (9 - pos) / 8 * 5), 1)
         lineup_rows.append({'pos': pos, 'bonus': bonus})
 
     context = {'lineup_rows': lineup_rows}
     return render(request, 'scoring_guide.html', context)
 
 
+def accuracy(request):
+    """Historical accuracy: how often did the top A-list pick get a hit?"""
+    rows = []
+    dates_with_results = (
+        Prediction.objects
+        .filter(list_type=Prediction.LIST_A, got_hit__isnull=False)
+        .values_list('date', flat=True)
+        .distinct()
+        .order_by('-date')
+    )
+    for d in dates_with_results:
+        top = (
+            Prediction.objects
+            .filter(date=d, list_type=Prediction.LIST_A, got_hit__isnull=False)
+            .order_by('-score')
+            .first()
+        )
+        if top:
+            rows.append({'date': d, 'player': top.name, 'score': top.score, 'got_hit': top.got_hit})
+
+    total = len(rows)
+    hits  = sum(1 for r in rows if r['got_hit'])
+    pct   = round(hits / total * 100, 1) if total else None
+    context = {'rows': rows, 'total': total, 'hits': hits, 'pct': pct}
+    return render(request, 'accuracy.html', context)
+
+
 def dashboard(request):
-    selected_date = datetime(2025, 9, 28)
+    today = date_class.today()
+    selected_date = datetime(today.year, today.month, today.day)
 
     if request.GET.get('date'):
         date_str = request.GET.get('date')
@@ -58,9 +86,23 @@ def dashboard(request):
     a_list = Prediction.objects.filter(date=date_only, list_type=Prediction.LIST_A).order_by('-score')
     b_list = Prediction.objects.filter(date=date_only, list_type=Prediction.LIST_B).order_by('-score')
 
+    # Double Down pair: top 2 A-list picks with different game times (independent outcomes)
+    double_down_pair = []
+    seen_times = set()
+    for pick in a_list:
+        if pick.lineup_confirmed is False:
+            continue
+        game_key = pick.game_time or pick.opponent
+        if game_key not in seen_times:
+            double_down_pair.append(pick)
+            seen_times.add(game_key)
+        if len(double_down_pair) == 2:
+            break
+
     context = {
         'a_list': a_list,
         'b_list': b_list,
+        'double_down_pair': double_down_pair,
         'selected_date': selected_date.strftime('%Y-%m-%d'),
         'pretty_date': selected_date.strftime('%B %d, %Y'),
     }

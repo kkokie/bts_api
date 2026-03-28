@@ -6,7 +6,7 @@ from pybaseball import batting_stats_range, batting_stats, schedule_and_record, 
 from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
-SEASON = 2025
+SEASON = 2026
 
 # MAPPING: Full Name (from Stats) -> BRef Code (for Schedule)
 NAME_TO_ABBR = {
@@ -60,34 +60,41 @@ PARK_FACTORS = {
 
 
 def get_pitcher_stats(season):
-    """Fetch season pitcher stats and return a lookup dict keyed by (last_name, team)."""
-    print(f"  [DEBUG] Fetching pitcher stats for {season}...")
-    try:
-        df = pitching_stats(season, qual=1)
-
-        if 'Team' in df.columns:
-            df['Team'] = df['Team'].map(lambda x: FG_TO_BREF_TEAM.get(x, x))
-
-        lookup = {}
-        for _, row in df.iterrows():
-            name = row.get('Name', '')
-            if not isinstance(name, str) or not name:
+    """Fetch season pitcher stats and return a lookup dict keyed by (last_name, team).
+    Falls back to season-1 if current season data is unavailable (e.g. pre-season)."""
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Fetching pitcher stats for {try_season}...")
+        try:
+            df = pitching_stats(try_season, qual=1)
+            if df.empty:
+                print(f"  [DEBUG] ⚠️ pitching_stats({try_season}) returned empty, trying fallback.")
                 continue
-            last_name = name.split()[-1].lower()
-            team = row.get('Team', '')
-            key = (last_name, team)
-            if key not in lookup or row.get('GS', 0) > lookup[key].get('GS', 0):
-                lookup[key] = {
-                    'ERA': row.get('ERA'),
-                    'WHIP': row.get('WHIP'),
-                    'GS': row.get('GS', 0),
-                }
 
-        print(f"  [DEBUG] Loaded stats for {len(lookup)} pitchers.")
-        return lookup
-    except Exception as e:
-        print(f"  [DEBUG] ❌ CRASH in get_pitcher_stats: {e}")
-        return {}
+            if 'Team' in df.columns:
+                df['Team'] = df['Team'].map(lambda x: FG_TO_BREF_TEAM.get(x, x))
+
+            lookup = {}
+            for _, row in df.iterrows():
+                name = row.get('Name', '')
+                if not isinstance(name, str) or not name:
+                    continue
+                last_name = name.split()[-1].lower()
+                team = row.get('Team', '')
+                key = (last_name, team)
+                if key not in lookup or row.get('GS', 0) > lookup[key].get('GS', 0):
+                    lookup[key] = {
+                        'ERA': row.get('ERA'),
+                        'WHIP': row.get('WHIP'),
+                        'GS': row.get('GS', 0),
+                    }
+
+            print(f"  [DEBUG] Loaded stats for {len(lookup)} pitchers (season {try_season}).")
+            return lookup
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ pitcher stats for {try_season} failed: {e}")
+            continue
+    print(f"  [DEBUG] ❌ Could not fetch pitcher stats for {season} or {season - 1}.")
+    return {}
 
 
 def _normalize_pitcher_team(raw):
@@ -245,10 +252,69 @@ def get_avg_batting_order(start_date, end_date):
                     pitcher_hand[last] = ph_row['p_throws']
 
         print(f"  [DEBUG] Got pitcher hand for {len(pitcher_hand)} pitchers.")
-        return result, pitcher_hand
+
+        # --- xBA (expected batting average on contact, from Statcast) ---
+        xba_lookup = {}
+        if 'estimated_ba_using_speedangle' in df.columns:
+            xba_data = df[df['estimated_ba_using_speedangle'].notna()][
+                ['batter', 'estimated_ba_using_speedangle']
+            ].copy()
+            xba_by_id = xba_data.groupby('batter')['estimated_ba_using_speedangle'].mean()
+            for _, row in id_df.iterrows():
+                mlbam_id = row['key_mlbam']
+                first = str(row['name_first']).strip().title()
+                last  = str(row['name_last']).strip().title()
+                full_name = clean_name_string(f"{first} {last}")
+                if mlbam_id in xba_by_id.index:
+                    val = float(xba_by_id[mlbam_id])
+                    xba_lookup[full_name] = val
+                    ascii_key = ascii_normalize(full_name)
+                    if ascii_key != full_name:
+                        xba_lookup[ascii_key] = val
+        print(f"  [DEBUG] Got xBA for {len(xba_lookup)} players.")
+
+        # --- Hard Hit Rate (exit velocity >= 95 mph) ---
+        hard_hit_lookup = {}
+        if 'launch_speed' in df.columns:
+            batted = df[df['launch_speed'].notna()][['batter', 'launch_speed']].copy()
+            batted['hard_hit'] = batted['launch_speed'] >= 95
+            hh_by_id = batted.groupby('batter')['hard_hit'].mean()
+            for _, row in id_df.iterrows():
+                mlbam_id = row['key_mlbam']
+                first = str(row['name_first']).strip().title()
+                last  = str(row['name_last']).strip().title()
+                full_name = clean_name_string(f"{first} {last}")
+                if mlbam_id in hh_by_id.index:
+                    val = float(hh_by_id[mlbam_id])
+                    hard_hit_lookup[full_name] = val
+                    ascii_key = ascii_normalize(full_name)
+                    if ascii_key != full_name:
+                        hard_hit_lookup[ascii_key] = val
+        print(f"  [DEBUG] Got hard hit rate for {len(hard_hit_lookup)} players.")
+
+        # --- Batter handedness from statcast (stand column: 'L' or 'R') ---
+        # Reliable fallback when FanGraphs season data is unavailable (e.g. pre-season)
+        batter_hand_lookup = {}
+        if 'stand' in df.columns:
+            stand_df = df[['batter', 'stand']].dropna().drop_duplicates('batter')
+            hand_by_id = stand_df.set_index('batter')['stand'].to_dict()
+            for _, row in id_df.iterrows():
+                mlbam_id = row['key_mlbam']
+                if mlbam_id in hand_by_id:
+                    first = str(row['name_first']).strip().title()
+                    last  = str(row['name_last']).strip().title()
+                    full_name = clean_name_string(f"{first} {last}")
+                    val = hand_by_id[mlbam_id]
+                    batter_hand_lookup[full_name] = val
+                    ascii_key = ascii_normalize(full_name)
+                    if ascii_key != full_name:
+                        batter_hand_lookup[ascii_key] = val
+        print(f"  [DEBUG] Got batter handedness for {len(batter_hand_lookup)} players.")
+
+        return result, pitcher_hand, xba_lookup, hard_hit_lookup, batter_hand_lookup
     except Exception as e:
         print(f"  [DEBUG] ❌ CRASH in get_avg_batting_order: {e}")
-        return {}, {}
+        return {}, {}, {}, {}, {}
 
 
 def get_hit_streaks(reference_date, days_back=30):
@@ -268,6 +334,11 @@ def get_hit_streaks(reference_date, days_back=30):
             return {}
 
         hit_events = {'single', 'double', 'triple', 'home_run'}
+        # Only count regular season games — exclude spring training (game_type='S'), playoffs, etc.
+        if 'game_type' in df.columns:
+            df = df[df['game_type'] == 'R']
+        if df.empty:
+            return {}
         finished = df[df['events'].notna()][['batter', 'game_date', 'events']].copy()
         finished['game_date'] = pd.to_datetime(finished['game_date'])
 
@@ -407,13 +478,19 @@ def get_window_stats(days_back, reference_date):
         print(f"  [DEBUG] ✅ Success! Found granular data for {days_back}d window.")
 
     except (IndexError, ValueError, Exception) as e:
-        # ATTEMPT 2: Fallback to Full Season (FanGraphs)
+        # ATTEMPT 2 & 3: Fallback to Full Season (FanGraphs), try current then prior season
         print(f"  [DEBUG] ⚠️ Range fetch failed ({e}). Falling back to FULL SEASON stats.")
-        try:
-            df = batting_stats(SEASON)
-            print(f"  [DEBUG] ✅ Fallback successful. Fetched full season stats.")
-        except Exception as e2:
-            print(f"  [DEBUG] ❌ CRASH: Even Season stats failed: {e2}")
+        df = pd.DataFrame()
+        for try_season in [SEASON, SEASON - 1]:
+            try:
+                df = batting_stats(try_season)
+                if not df.empty:
+                    print(f"  [DEBUG] ✅ Fallback successful with {try_season} season stats.")
+                    break
+            except Exception as e2:
+                print(f"  [DEBUG] ⚠️ Season {try_season} fallback failed: {e2}")
+        if df.empty:
+            print(f"  [DEBUG] ❌ CRASH: All season fallbacks failed.")
             return pd.DataFrame()
 
     # --- STANDARDIZATION ---
@@ -440,26 +517,28 @@ def get_window_stats(days_back, reference_date):
 
 
 def get_player_metadata(season):
-    print(f"  [DEBUG] Fetching player metadata for {season}...")
-    try:
-        df = batting_stats(season)
-        if 'Name' in df.columns:
-            df['Name'] = df['Name'].apply(clean_name_string)
-
-        # Standardize Team
-        if 'Team' in df.columns: df = df.rename(columns={'Team': 'Tm'})
-
-        # DEFENSIVE COLUMN SELECTION (The Fix)
-        # We only ask for columns that actually exist.
-        cols_to_keep = ['Name', 'Tm']
-        # FanGraphs 'Pos' is the positional adjustment in runs (a float), not position name — skip it
-        if 'Bats' in df.columns: cols_to_keep.append('Bats')
-
-        return df[cols_to_keep]
-
-    except Exception as e:
-        print(f"  [DEBUG] ❌ CRASH in get_player_metadata: {e}")
-        return pd.DataFrame()
+    """Fetch player metadata (Name, Team, Bats). Falls back to season-1 if unavailable."""
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Fetching player metadata for {try_season}...")
+        try:
+            df = batting_stats(try_season)
+            if df.empty:
+                print(f"  [DEBUG] ⚠️ batting_stats({try_season}) returned empty, trying fallback.")
+                continue
+            if 'Name' in df.columns:
+                df['Name'] = df['Name'].apply(clean_name_string)
+            if 'Team' in df.columns:
+                df = df.rename(columns={'Team': 'Tm'})
+            cols_to_keep = ['Name', 'Tm']
+            if 'Bats' in df.columns:
+                cols_to_keep.append('Bats')
+            print(f"  [DEBUG] Player metadata loaded (season {try_season}, has Bats: {'Bats' in df.columns}).")
+            return df[cols_to_keep]
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ player metadata for {try_season} failed: {e}")
+            continue
+    print(f"  [DEBUG] ❌ Could not fetch player metadata for {season} or {season - 1}.")
+    return pd.DataFrame()
 
 
 def get_matchup_info(team_name, game_date):
@@ -469,7 +548,7 @@ def get_matchup_info(team_name, game_date):
     if len(bref_team) > 3: return "Unknown", "Unknown", "", True
 
     try:
-        schedule = schedule_and_record(SEASON, bref_team)
+        schedule = schedule_and_record(game_date.year, bref_team)
         short_date = game_date.strftime("%b %-d")
         game = schedule[schedule['Date'].astype(str).str.contains(short_date, case=False)]
 
@@ -507,6 +586,53 @@ def get_matchup_info(team_name, game_date):
         return "Off Day", "N/A", "", True
     except:
         return "Unknown", "Unknown", "", True
+
+
+def get_probable_pitchers(game_date):
+    """
+    Fetches probable pitchers from MLB Stats API for game_date.
+    Returns {team_abbr: (pitcher_full_name, pitcher_hand)} for both home and away teams.
+    Pitcher hand is the first initial of ThrowingHand if available, else ''.
+    """
+    date_str = game_date.strftime('%Y-%m-%d')
+    url = (
+        f"https://statsapi.mlb.com/api/v1/schedule"
+        f"?sportId=1&date={date_str}&hydrate=probablePitcher"
+    )
+    print(f"  [DEBUG] Fetching probable pitchers for {date_str}...")
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        result = {}
+        for date_obj in data.get('dates', []):
+            for game in date_obj.get('games', []):
+                for side in ('home', 'away'):
+                    team_info = game.get('teams', {}).get(side, {})
+                    abbr = team_info.get('team', {}).get('abbreviation', '')
+                    probable = team_info.get('probablePitcher', {})
+                    if abbr and probable:
+                        name = probable.get('fullName', '')
+                        # pitchHand is nested under pitchHand.code: 'R', 'L', 'S'
+                        hand_info = probable.get('pitchHand', {})
+                        hand = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
+                        if hand == 'S':
+                            hand = ''  # switch pitcher — treat as unknown
+                        if name:
+                            result[abbr] = (name, hand)
+
+        # Normalize abbreviations to our internal keys
+        MLB_TO_BREF = {
+            'CHW': 'CWS', 'KCR': 'KC', 'SFG': 'SF', 'SDP': 'SD',
+            'TBR': 'TB', 'WSN': 'WSH', 'ATH': 'OAK',
+        }
+        result = {MLB_TO_BREF.get(k, k): v for k, v in result.items()}
+        print(f"  [DEBUG] Probable pitchers: {len(result)} games with pitchers announced.")
+        return result
+    except Exception as e:
+        print(f"  [DEBUG] ❌ CRASH in get_probable_pitchers: {e}")
+        return {}
 
 
 def get_lineup_status(game_date):
@@ -587,7 +713,7 @@ def get_predictions(simulation_date):
     # Fetch batting order early so it can influence scoring
     order_end = simulation_date - timedelta(days=1)
     order_start = order_end - timedelta(days=7)
-    batting_order_lookup, pitcher_hand_lookup = get_avg_batting_order(order_start, order_end)
+    batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = get_avg_batting_order(order_start, order_end)
 
     # Hot Teams Logic — rank all teams by runs scored in the 7-day window
     hot_teams = []
@@ -599,16 +725,17 @@ def get_predictions(simulation_date):
         # BRef groupby keys are full city names ('San Diego') — normalize to abbreviations
         team_rank = {NAME_TO_ABBR.get(t, FG_TO_BREF_TEAM.get(t, t)): r for t, r in team_rank_raw.items()}
 
-    # Projected weekly hit rate (H/G × 7) — normalizes BRef 7-day AND FanGraphs season
-    # fallback to the same scale, and handles first week / All-Star gaps cleanly.
-    if 'H' in candidates.columns and 'G' in candidates.columns:
-        h_proj = (candidates['H'] / candidates['G'].clip(lower=1)) * 7
-        h_mean = float(h_proj.mean()) if not h_proj.empty else 6.0
-        h_std  = float(h_proj.std())  if len(h_proj) > 1   else 2.0
-        if h_std == 0 or pd.isna(h_std):
-            h_std = 2.0
-    else:
-        h_mean, h_std = 6.0, 2.0
+    # Build 4-day stats lookup for exponential-decay BA weighting
+    ba_4d_lookup = {}
+    if not df_4d.empty and 'Name' in df_4d.columns:
+        for _, r4 in df_4d.iterrows():
+            name_4d = str(r4.get('Name', '')).strip()
+            if not name_4d:
+                continue
+            h4 = r4.get('H')
+            ab4 = r4.get('AB')
+            if h4 is not None and ab4 is not None and not pd.isna(h4) and not pd.isna(ab4):
+                ba_4d_lookup[name_4d] = {'H': float(h4), 'AB': float(ab4)}
 
     # K% z-score parameters — lower K% is better, so z-score is inverted in display
     if 'K%' in candidates.columns:
@@ -621,35 +748,73 @@ def get_predictions(simulation_date):
         kpct_mean, kpct_std = 20.0, 5.0
 
     for index, row in candidates.iterrows():
-        hits = float(row['H']) if 'H' in row and pd.notna(row['H']) else 0.0
+        name = str(row.get('Name', ''))
+        ascii_name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
+
+        hits  = float(row['H'])  if 'H'  in row and pd.notna(row['H'])  else 0.0
+        ab_7d = float(row['AB']) if 'AB' in row and pd.notna(row['AB']) else max(hits / 0.270, 1.0)
         games = max(float(row['G']) if 'G' in row and pd.notna(row['G']) else 1.0, 1.0)
-        h_proj = (hits / games) * 7  # projected hits in a 7-game week
-        h_z = round((h_proj - h_mean) / h_std, 1)
 
-        score = h_proj
-        breakdown = [f"H: {round(h_proj, 1)} ({h_z:+.1f}σ)"]
+        # Exponential-decay weighted BA: last 4d × 2 weight, older days-5-7 × 1 weight
+        p4d = ba_4d_lookup.get(name) or ba_4d_lookup.get(ascii_name)
+        if p4d and ab_7d > p4d['AB'] and p4d['AB'] > 0:
+            h_old  = max(hits - p4d['H'], 0.0)
+            ab_old = max(ab_7d - p4d['AB'], 0.0)
+            denom  = p4d['AB'] * 2 + ab_old
+            ba_weighted = (p4d['H'] * 2 + h_old) / denom if denom > 0 else hits / ab_7d
+        else:
+            ba_weighted = hits / ab_7d if ab_7d > 0 else 0.260
+        ba_weighted = max(0.050, min(ba_weighted, 0.600))
 
-        # Always show actual K% value with z-score; bonus still applied if < 12%
-        if 'K%' in row and pd.notna(row['K%']):
-            k_pct = float(row['K%'])
-            k_z = round((k_pct - kpct_mean) / kpct_std, 1)
-            breakdown.append(f"K%: {round(k_pct, 1)}% ({k_z:+.1f}σ)")
-            if k_pct < 12.0:
-                score += 10
+        # Blend with xBA (Statcast expected BA — more stable, luck-neutral predictor)
+        xba = xba_lookup.get(name) or xba_lookup.get(ascii_name)
+        if xba is not None:
+            ba_effective = 0.55 * float(xba) + 0.45 * ba_weighted
+        else:
+            ba_effective = ba_weighted
 
-        # Show team's offensive rank among all teams; bonus still applied if top 10
+        # K% modifies effective BA (elite contact → higher; free-swinger → lower)
+        k_pct = float(row['K%']) if 'K%' in candidates.columns and pd.notna(row.get('K%')) else 20.0
+        k_z   = round((k_pct - kpct_mean) / kpct_std, 1)
+        if k_pct < 12.0:
+            ba_effective *= 1.04
+        elif k_pct > 22.0:
+            ba_effective *= 0.97
+
+        # Hard hit rate adjustment
+        hard_hit = hard_hit_lookup.get(name) or hard_hit_lookup.get(ascii_name)
+        if hard_hit is not None:
+            if hard_hit > 0.45:
+                ba_effective *= 1.02
+            elif hard_hit < 0.28:
+                ba_effective *= 0.98
+
+        # Team offensive environment
         rank = team_rank.get(str(row['Tm']).strip())
+        if row['Tm'] in hot_teams:
+            ba_effective *= 1.02
+
+        # Lineup-adjusted AB per game (top of order gets ~0.4 more ABs than 9-hole)
+        avg_order = batting_order_lookup.get(name) or batting_order_lookup.get(ascii_name)
+        ab_per_game = ab_7d / games
+        if avg_order is not None:
+            ab_per_game = max(2.5, ab_per_game + (5.0 - float(avg_order)) * 0.08)
+
+        # P(hit) = 1 - (1 - BA_eff)^(AB/game)  — Bernoulli probability of ≥1 hit
+        p_hit = 1.0 - (1.0 - min(ba_effective, 0.995)) ** max(ab_per_game, 1.0)
+        score = round(p_hit * 100, 1)
+
+        # Breakdown string
+        breakdown = [f"P(Hit): {score}%"]
+        breakdown.append(f"BA: {ba_weighted:.3f}")
+        if xba is not None:
+            breakdown.append(f"xBA: {float(xba):.3f}")
+        if hard_hit is not None:
+            breakdown.append(f"HH%: {round(hard_hit * 100)}%")
+        breakdown.append(f"K%: {round(k_pct, 1)}% ({k_z:+.1f}σ)")
         if rank is not None:
             breakdown.append(f"Team Rank: #{rank}")
-        if row['Tm'] in hot_teams:
-            score += 10
-
-        avg_order = batting_order_lookup.get(row['Name']) or batting_order_lookup.get(
-            unicodedata.normalize('NFKD', row['Name']).encode('ascii', 'ignore').decode()
-        )
         if avg_order is not None:
-            bonus = round(max(0.0, (9 - avg_order) / 8 * 10), 1)
-            score += bonus
             breakdown.append(f"Lineup: #{avg_order}")
 
         candidates.at[index, 'Score'] = score
@@ -698,6 +863,17 @@ def get_predictions(simulation_date):
     unique_teams = merged['Tm'].dropna().unique().tolist()
     matchup_cache = {team: get_matchup_info(team, simulation_date) for team in unique_teams}  # → (opp, pitcher, time, is_home)
 
+    # Supplement BRef schedule with MLB Stats API probable pitchers for upcoming games
+    probable_pitchers = get_probable_pitchers(simulation_date)
+    for team, (opp, pitcher, game_time, is_home) in list(matchup_cache.items()):
+        if pitcher == 'TBD' and team in probable_pitchers:
+            pp_name, pp_hand = probable_pitchers[team]
+            matchup_cache[team] = (opp, pp_name, game_time, is_home)
+            # Inject hand into pitcher_hand_lookup keyed by last name (lowercase)
+            if pp_hand and pp_name:
+                last = pp_name.split()[-1].lower()
+                pitcher_hand_lookup[last] = pp_hand
+
     # One FanGraphs call for all pitcher stats
     pitcher_lookup = get_pitcher_stats(SEASON)
 
@@ -719,13 +895,17 @@ def get_predictions(simulation_date):
         pos = row.get('Pos', 'Unknown')
         if pd.isna(pos): pos = 'Unknown'
 
-        bats = row.get('Bats', 'R')
-        if pd.isna(bats): bats = 'R'
-
-        reason_for_demotion = []
-        if bats == 'L': reason_for_demotion.append("Lefty Batter")
+        bats = row.get('Bats', None)
+        if bats is None or (isinstance(bats, float) and pd.isna(bats)):
+            # FanGraphs metadata unavailable (e.g. pre-season) — fall back to Statcast stand
+            _asc = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
+            bats = batter_hand_lookup.get(name) or batter_hand_lookup.get(_asc) or 'R'
 
         opponent, pitcher, game_time, is_home = matchup_cache.get(team, ("Unknown", "Unknown", "", True))
+
+        # Skip players whose team has no game today
+        if opponent in ("Unknown", "Off Day", "N/A"):
+            continue
 
         # Park factor belongs to the home team's stadium.
         # team is already a clean abbreviation after resolve_team().
@@ -745,16 +925,30 @@ def get_predictions(simulation_date):
                 pitcher_era = stats.get('ERA')
                 pitcher_whip = stats.get('WHIP')
 
-        # Pitcher throwing hand from statcast
+        # Pitcher throwing hand — must be resolved before platoon decision
         pitcher_hand = ''
         if pitcher and pitcher not in ('TBD', 'Unknown', 'N/A'):
             last_name = pitcher.split()[-1].lower()
             pitcher_hand = pitcher_hand_lookup.get(last_name, '')
 
-        # Park factor — display only, not factored into score
+        # Platoon-aware A/B list split.
+        # Cross-handed (LHB vs RHP, RHB vs LHP) = platoon ADVANTAGE → A-list.
+        # Same-handed (LHB vs LHP, RHB vs RHP) = platoon DISADVANTAGE → B-list.
+        # Unknown pitcher hand → conservatively demote to B-list.
+        reason_for_demotion = []
+        if pitcher_hand:
+            is_cross_handed = (bats == 'L' and pitcher_hand == 'R') or (bats == 'R' and pitcher_hand == 'L')
+            if not is_cross_handed:
+                reason_for_demotion.append(f"{bats} vs {pitcher_hand}")
+        else:
+            reason_for_demotion.append(f"{bats} (hand unknown)")
+
+        # Park factor and platoon matchup label — display only, not factored into score
         score_breakdown = str(row.get('Score_Breakdown', ''))
         pf_label = f"Park: {park_factor}"
         score_breakdown = f"{score_breakdown} | {pf_label}" if score_breakdown else pf_label
+        if pitcher_hand and bats:
+            score_breakdown += f" | Matchup: {bats}v{pitcher_hand}"
 
         # Opposing pitcher recent stats (~4 starts) — display only
         if pitcher and pitcher not in ('TBD', 'Unknown', 'N/A'):
@@ -794,6 +988,7 @@ def get_predictions(simulation_date):
             unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode(), 0
         ) or 0
 
+        _ascii_name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode()
         player_info = {
             'Name': name,
             'Team': team,
@@ -814,6 +1009,7 @@ def get_predictions(simulation_date):
             'Is_Home': is_home,
             'Team_Rank': team_rank.get(str(team).strip()),
             'Hit_Streak': hit_streak,
+            'XBA': xba_lookup.get(name) or xba_lookup.get(_ascii_name),
         }
 
         if reason_for_demotion:

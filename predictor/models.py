@@ -20,7 +20,7 @@ class Prediction(models.Model):
     avg_batting_order = models.FloatField(null=True, blank=True)
     notes = models.CharField(max_length=200, blank=True, default='')
     pitcher_hand = models.CharField(max_length=1, blank=True, default='')
-    score_breakdown = models.CharField(max_length=800, blank=True, default='')
+    score_breakdown = models.CharField(max_length=1200, blank=True, default='')
     got_hit = models.BooleanField(null=True, blank=True, default=None)
     stadium = models.CharField(max_length=100, blank=True, default='')
     game_time = models.CharField(max_length=20, blank=True, default='')
@@ -29,6 +29,7 @@ class Prediction(models.Model):
     team_rank = models.IntegerField(null=True, blank=True)
     hit_streak = models.IntegerField(default=0)
     lineup_confirmed = models.BooleanField(null=True, blank=True, default=None)
+    xba = models.FloatField(null=True, blank=True)
 
     class Meta:
         unique_together = ('date', 'name')
@@ -63,6 +64,7 @@ class Prediction(models.Model):
                 is_home=p.get('Is_Home', True),
                 team_rank=p.get('Team_Rank'),
                 hit_streak=p.get('Hit_Streak', 0),
+                xba=p.get('XBA'),
             )
             for p in a_list
         ] + [
@@ -82,6 +84,7 @@ class Prediction(models.Model):
                 is_home=p.get('Is_Home', True),
                 team_rank=p.get('Team_Rank'),
                 hit_streak=p.get('Hit_Streak', 0),
+                xba=p.get('XBA'),
             )
             for p in b_list
         ]

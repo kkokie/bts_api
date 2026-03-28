@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Accuracy — Beat the Streak AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="container py-5" style="max-width: 860px;">
+    <div class="mb-4">
+        <a href="/" class="btn btn-sm btn-outline-secondary mb-3">&larr; Back to Dashboard</a>
+        <h1 class="display-6 fw-bold">Historical Accuracy</h1>
+        <p class="text-muted">How often did the model's top A-list pick get a hit? Score = P(Hit)% for predictions generated with the current model.</p>
+    </div>
+
+    {% if pct is not None %}
+    <div class="row mb-4 g-3">
+        <div class="col-sm-4">
+            <div class="card text-center shadow-sm">
+                <div class="card-body">
+                    <div class="display-4 fw-bold text-primary">{{ pct }}%</div>
+                    <div class="text-muted">Overall Hit Rate</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="card text-center shadow-sm">
+                <div class="card-body">
+                    <div class="display-4 fw-bold text-success">{{ hits }}</div>
+                    <div class="text-muted">Correct Picks</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="card text-center shadow-sm">
+                <div class="card-body">
+                    <div class="display-4 fw-bold">{{ total }}</div>
+                    <div class="text-muted">Days Tracked</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Top Pick Per Day</h5>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Player</th>
+                        <th>Score</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        <td>{{ r.date }}</td>
+                        <td>{{ r.player }}</td>
+                        <td>{{ r.score }}</td>
+                        <td>
+                            {% if r.got_hit %}
+                                <span class="badge bg-success">Hit</span>
+                            {% else %}
+                                <span class="badge bg-danger">No Hit</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="text-center py-3 text-muted">No past results yet — run predictions for past dates to populate.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
