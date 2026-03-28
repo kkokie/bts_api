@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bts
+      POSTGRES_USER: bts
+      POSTGRES_PASSWORD: bts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://bts:bts@db:5432/bts
+      SECRET_KEY: dev-insecure-key
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

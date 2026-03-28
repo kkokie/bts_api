@@ -17,3 +17,13 @@ include/
 
 # Data (Optional: if you download huge CSVs, un-comment this to keep them local)
 # data/
+
+# Environment and secrets
+.env
+
+# Django
+db.sqlite3
+staticfiles/
+
+# Logs
+lineup_cron.log
