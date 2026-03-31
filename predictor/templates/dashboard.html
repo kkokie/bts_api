@@ -122,16 +122,20 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     var PITCHER_PREFIXES = ['P.H', 'P.ERA', 'P.BB', 'P.IP', 'BP'];
-    var SKIP_PREFIXES    = ['Team Rank', 'Lineup', 'Park'];
+    var SKIP_PREFIXES    = ['Team Rank', 'Lineup', 'Park', 'Matchup'];
 
     var TOOLTIPS = {
-        'H:':    'Projected hits per 7-game week. Higher = hotter bat.',
-        'K%':    'Strikeout rate last 7 days. Lower = better contact.',
-        'P.H':   'Hits allowed by opposing starter (last ~4 starts). Higher = easier matchup.',
-        'P.ERA': 'ERA of opposing starter (last ~4 starts). Higher = easier matchup.',
-        'P.BB':  'Walks issued by opposing starter (last ~4 starts). Higher = wilder pitcher.',
-        'P.IP':  'Innings pitched by opposing starter (last ~4 starts).',
-        'BP':    'Hits allowed by opponent\'s bullpen (last 15 days). Higher = weaker bullpen.',
+        'P(Hit)': 'Estimated probability of getting a hit based on weighted BA, xBA, lineup position, and park factor.',
+        'H:':     'Projected hits per 7-game week based on recent batting average. Higher = hotter bat.',
+        'BA:':    'Weighted batting average over the last 7 days (last 4 days count double).',
+        'xBA:':   'Expected batting average from Statcast (quality of contact). More stable than actual BA.',
+        'HH%:':   'Hard hit rate — % of balls hit 95+ mph (Statcast). Higher = better contact quality.',
+        'K%':     'Strikeout rate last 7 days. Lower = better contact. Shown as z-score vs pool average.',
+        'P.H':    'Hits allowed by opposing starter (last ~4 starts). Higher = easier matchup.',
+        'P.ERA':  'ERA of opposing starter (last ~4 starts). Higher = easier matchup.',
+        'P.BB':   'Walks issued by opposing starter (last ~4 starts). Higher = wilder pitcher.',
+        'P.IP':   'Innings pitched by opposing starter (last ~4 starts).',
+        'BP':     'Hits allowed by opponent\'s bullpen (last 15 days). Higher = weaker bullpen.',
     };
 
     function getTooltip(factor) {

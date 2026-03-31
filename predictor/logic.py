@@ -716,20 +716,19 @@ def get_probable_pitchers(game_date):
     """
     Fetches probable pitchers from MLB Stats API for game_date.
     Returns {team_abbr: (pitcher_full_name, pitcher_hand)} for both home and away teams.
-    Pitcher hand is the first initial of ThrowingHand if available, else ''.
+    Batch-fetches pitcher hand from the people API since the schedule endpoint
+    doesn't include pitchHand in the probablePitcher object.
     """
     date_str = game_date.strftime('%Y-%m-%d')
-    url = (
-        f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={date_str}&hydrate=probablePitcher"
-    )
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher"
     print(f"  [DEBUG] Fetching probable pitchers for {date_str}...")
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
-        result = {}
+        # First pass: collect (team_abbr, pitcher_id, pitcher_name)
+        entries = []
         for date_obj in data.get('dates', []):
             for game in date_obj.get('games', []):
                 for side in ('home', 'away'):
@@ -737,12 +736,32 @@ def get_probable_pitchers(game_date):
                     abbr = _mlb_team_name_to_abbr(team_info.get('team', {}).get('name', ''))
                     probable = team_info.get('probablePitcher') or {}
                     name = probable.get('fullName', '')
-                    if abbr and name:
-                        hand_info = probable.get('pitchHand', {})
-                        hand = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
-                        if hand == 'S':
-                            hand = ''
-                        result[abbr] = (name, hand)
+                    pid = probable.get('id')
+                    if abbr and name and pid:
+                        entries.append((abbr, pid, name))
+
+        if not entries:
+            print(f"  [DEBUG] Probable pitchers: 0 teams with pitchers announced.")
+            return {}
+
+        # Batch-fetch pitcher hand from people API (one call for all pitchers)
+        all_ids = ','.join(str(e[1]) for e in entries)
+        people_resp = requests.get(
+            f"https://statsapi.mlb.com/api/v1/people?personIds={all_ids}",
+            timeout=10
+        )
+        hand_by_id = {}
+        if people_resp.ok:
+            for person in people_resp.json().get('people', []):
+                pid = person.get('id')
+                hand_info = person.get('pitchHand', {})
+                code = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
+                hand_by_id[pid] = '' if code == 'S' else code
+
+        result = {}
+        for abbr, pid, name in entries:
+            hand = hand_by_id.get(pid, '')
+            result[abbr] = (name, hand)
 
         print(f"  [DEBUG] Probable pitchers: {len(result)} teams with pitchers announced.")
         return result
@@ -1003,6 +1022,34 @@ def get_predictions(simulation_date):
             if pp_hand and pp_name:
                 last = pp_name.split()[-1].lower()
                 pitcher_hand_lookup[last] = pp_hand
+
+    # Final fallback: for any pitcher in today's matchups whose hand is still unknown,
+    # look them up from the MLB people API by name search
+    unknown_pitchers = set()
+    for team, (opp, pitcher, game_time, is_home) in matchup_cache.items():
+        if pitcher and pitcher not in ('TBD', 'N/A', 'Unknown'):
+            last = pitcher.split()[-1].lower()
+            if last not in pitcher_hand_lookup:
+                unknown_pitchers.add(pitcher)
+    if unknown_pitchers:
+        print(f"  [DEBUG] Looking up hand for {len(unknown_pitchers)} unknown pitcher(s)...")
+        for pitcher_name in unknown_pitchers:
+            try:
+                r = requests.get(
+                    f"https://statsapi.mlb.com/api/v1/people/search?names={requests.utils.quote(pitcher_name)}&sportId=1",
+                    timeout=5
+                )
+                people = r.json().get('people', [])
+                if people:
+                    person = people[0]
+                    hand_info = person.get('pitchHand', {})
+                    code = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
+                    if code and code != 'S':
+                        last = pitcher_name.split()[-1].lower()
+                        pitcher_hand_lookup[last] = code
+                        print(f"  [DEBUG] Found hand for {pitcher_name}: {code}")
+            except Exception:
+                pass
 
     # One FanGraphs call for all pitcher stats
     pitcher_lookup = get_pitcher_stats(SEASON)
