@@ -2,7 +2,7 @@ import re
 import unicodedata
 import requests
 import pandas as pd
-from pybaseball import batting_stats_range, batting_stats, schedule_and_record, pitching_stats, pitching_stats_range, statcast, playerid_reverse_lookup
+from pybaseball import batting_stats_range, batting_stats, schedule_and_record, pitching_stats, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
 from datetime import datetime, timedelta, date as date_class, timezone
 
 # --- CONFIGURATION ---
@@ -825,6 +825,51 @@ def get_lineup_status(game_date):
         return {}, set()
 
 
+def get_sprint_speed(season):
+    """
+    Fetch sprint speed leaderboard from Statcast for the given season.
+    Returns {player_name: sprint_speed_ft_per_sec}.
+    Falls back to prior season if current season data unavailable.
+    """
+    def ascii_normalize(s):
+        return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode()
+
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Fetching sprint speed for {try_season}...")
+        try:
+            df = statcast_sprint_speed(try_season, min_opp=0)
+            if df is None or df.empty:
+                continue
+            result = {}
+            name_col = next((c for c in df.columns if 'name' in c.lower()), None)
+            speed_col = 'sprint_speed' if 'sprint_speed' in df.columns else None
+            if not name_col or not speed_col:
+                print(f"  [DEBUG] ⚠️ Sprint speed missing expected columns: {list(df.columns)}")
+                continue
+            for _, row in df.iterrows():
+                name_raw = str(row.get(name_col, '')).strip()
+                if not name_raw:
+                    continue
+                # Statcast returns "Last, First" — convert to "First Last"
+                if ',' in name_raw:
+                    parts = name_raw.split(',', 1)
+                    full_name = f"{parts[1].strip()} {parts[0].strip()}"
+                else:
+                    full_name = name_raw
+                full_name = clean_name_string(full_name)
+                speed = row.get(speed_col)
+                if speed is not None and not pd.isna(speed):
+                    result[full_name] = float(speed)
+                    ascii_key = ascii_normalize(full_name)
+                    if ascii_key != full_name:
+                        result[ascii_key] = float(speed)
+            print(f"  [DEBUG] Sprint speed: {len(result)} players from {try_season}.")
+            return result
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ Sprint speed {try_season} failed: {e}")
+    return {}
+
+
 def get_predictions(simulation_date):
     print(f"\n--- 🕵️‍♂️ STARTING DEBUG ANALYSIS FOR: {simulation_date.strftime('%Y-%m-%d')} ---")
 
@@ -851,6 +896,7 @@ def get_predictions(simulation_date):
     order_end = simulation_date - timedelta(days=1)
     order_start = order_end - timedelta(days=7)
     batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = get_avg_batting_order(order_start, order_end)
+    sprint_speed_lookup = get_sprint_speed(simulation_date.year)
 
     # Hot Teams Logic — rank all teams by runs scored in the 7-day window
     hot_teams = []
@@ -926,6 +972,16 @@ def get_predictions(simulation_date):
             elif hard_hit < 0.28:
                 ba_effective *= 0.98
 
+        # Sprint speed adjustment (Statcast ft/s)
+        speed = sprint_speed_lookup.get(name) or sprint_speed_lookup.get(ascii_name)
+        if speed is not None:
+            if speed > 30.0:
+                ba_effective *= 1.03
+            elif speed > 28.0:
+                ba_effective *= 1.015
+            elif speed < 25.0:
+                ba_effective *= 0.98
+
         # Team offensive environment
         rank = team_rank.get(str(row['Tm']).strip())
         if row['Tm'] in hot_teams:
@@ -949,6 +1005,15 @@ def get_predictions(simulation_date):
         if hard_hit is not None:
             breakdown.append(f"HH%: {round(hard_hit * 100)}%")
         breakdown.append(f"K%: {round(k_pct, 1)}% ({k_z:+.1f}σ)")
+        # BB% (walk rate) — display only
+        bb_pct = None
+        if 'BB' in row and 'PA' in row and pd.notna(row.get('BB')) and pd.notna(row.get('PA')) and float(row.get('PA', 0)) > 0:
+            bb_pct = round(float(row['BB']) / float(row['PA']) * 100, 1)
+        if bb_pct is not None:
+            breakdown.append(f"BB%: {bb_pct}%")
+        # Sprint speed — display only
+        if speed is not None:
+            breakdown.append(f"Speed: {speed:.1f} ft/s")
         if rank is not None:
             breakdown.append(f"Team Rank: #{rank}")
         if avg_order is not None:

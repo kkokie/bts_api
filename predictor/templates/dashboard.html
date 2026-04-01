@@ -117,6 +117,88 @@
         </div>
     </div>
 
+    <!-- B-List Toggle -->
+    {% if b_list %}
+    <div class="text-center mb-3">
+        <button class="btn btn-sm btn-outline-warning" type="button"
+                data-bs-toggle="collapse" data-bs-target="#bListSection" aria-expanded="false">
+            Not satisfied? Show more options (B-List — {{ b_list.count }} players with platoon disadvantage) &#9660;
+        </button>
+    </div>
+
+    <div class="collapse" id="bListSection">
+        <div class="card shadow-sm mb-4 border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">&#9888; B-List &mdash; Platoon Disadvantage or Unknown Pitcher Hand</h5>
+                <small class="text-dark opacity-75">These players score well but face same-handed pitchers. Use with caution.</small>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Player</th>
+                            <th>Matchup</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in b_list %}
+                        <tr>
+                            <td>
+                                {% if p.lineup_confirmed == False %}
+                                    <strong class="text-muted" style="text-decoration: line-through;">{{ p.name }}</strong>
+                                    <small class="text-danger ms-1">not in lineup</small>
+                                {% elif p.got_hit %}
+                                    <strong class="text-success">{{ p.name }}</strong>
+                                {% elif p.got_hit is not None %}
+                                    <strong class="text-danger">{{ p.name }}</strong>
+                                {% else %}
+                                    <strong>{{ p.name }}</strong>
+                                {% endif %}
+                                <span class="text-muted fw-normal"> &mdash; {{ p.team }}</span>
+                                <br>
+                                <small class="text-muted">Bats {{ p.bats }}</small>
+                                <span class="d-inline-flex gap-1 flex-wrap align-items-center ms-1">
+                                    {% if p.avg_batting_order %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Average lineup position (last 7 days)">#{{ p.avg_batting_order }} lineup</span>{% endif %}
+                                    {% if p.team_rank %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Team offensive rank by runs scored (last 7 days)">Rank #{{ p.team_rank }}</span>{% endif %}
+                                    {% if p.park_factor %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Park factor — 100 is league average, higher means more hits">PF {{ p.park_factor }}</span>{% endif %}
+                                    {% if p.hit_streak %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Consecutive games with at least one hit">{{ p.hit_streak }}G streak{{ p.fire_emojis }}</span>{% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                {% if p.is_home %}vs{% else %}@{% endif %} {{ p.opponent }}<br>
+                                <small class="text-muted">
+                                    {% if p.pitcher_hand %}[{{ p.pitcher_hand }}] {% endif %}{{ p.probable_pitcher }}
+                                    {% if p.pitcher_era is not None %}
+                                    &mdash; ERA: {{ p.pitcher_era }} / WHIP: {{ p.pitcher_whip }}
+                                    {% endif %}
+                                </small>
+                                {% if p.stadium %}
+                                <br>
+                                <small class="text-secondary">
+                                    {{ p.stadium }}{% if p.game_time %} &mdash; {{ p.game_time }}{% endif %}
+                                </small>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr class="factor-row">
+                            <td colspan="2" class="pb-2">
+                                <div class="d-flex justify-content-between align-items-start gap-2"
+                                     data-breakdown="{{ p.score_breakdown }}">
+                                    <div class="batter-badges d-flex flex-wrap gap-1 align-items-center"></div>
+                                    <div class="pitcher-badges d-flex flex-wrap gap-1 align-items-center justify-content-end"></div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="text-center py-3">No B-List candidates.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -131,6 +213,8 @@
         'xBA:':   'Expected batting average from Statcast (quality of contact). More stable than actual BA.',
         'HH%:':   'Hard hit rate — % of balls hit 95+ mph (Statcast). Higher = better contact quality.',
         'K%':     'Strikeout rate last 7 days. Lower = better contact. Shown as z-score vs pool average.',
+        'BB%:':   'Walk rate last 7 days. Higher = more patient hitter / draws more pitches.',
+        'Speed:': 'Sprint speed (ft/s) from Statcast. Faster runners reach more infield singles. > 30 ft/s boosts score, < 25 ft/s lowers it.',
         'P.H':    'Hits allowed by opposing starter (last ~4 starts). Higher = easier matchup.',
         'P.ERA':  'ERA of opposing starter (last ~4 starts). Higher = easier matchup.',
         'P.BB':   'Walks issued by opposing starter (last ~4 starts). Higher = wilder pitcher.',
