@@ -540,6 +540,33 @@ pybaseball sometimes returns names with literal `\xhh` escape sequences instead 
 **Season constant**
 `SEASON = 2025` in `logic.py` controls which season's FanGraphs data is fetched. Update this at the start of each new season.
 
+**All statcast calls disabled on Railway hobby plan (512MB RAM)**
+Three statcast-dependent lookups are currently disabled in `get_predictions()` and return empty dicts: `get_hit_streaks`, `get_avg_batting_order` (which also provides `pitcher_hand_lookup`, `xba_lookup`, `hard_hit_lookup`, `batter_hand_lookup`). Statcast returns pitch-by-pitch data for every game in the window — even a 7-day pull exceeds 512MB and OOM-kills the Railway worker. The functions still exist and are correct; they just aren't called. `get_pitcher_recent_stats` window was also reduced from 28 → 21 days for the same reason.
+
+To re-enable once RAM is sufficient (≥1GB) or a caching strategy is in place:
+```python
+# In get_predictions(), replace:
+batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = {}, {}, {}, {}, {}
+hit_streak_lookup = {}
+# With:
+order_end = simulation_date - timedelta(days=1)
+order_start = order_end - timedelta(days=7)
+batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = get_avg_batting_order(order_start, order_end)
+hit_streak_lookup = get_hit_streaks(simulation_date)
+
+# And restore the default window:
+def get_pitcher_recent_stats(reference_date, days_back=28):
+```
+
+Long-term fix: pre-fetch and cache statcast data nightly via a cron job or background task so the web worker never pulls raw statcast on a live request.
+
+**Proposed solution — nightly statcast cache:**
+1. Add a new Django model (e.g. `StatcastCache`) with fields for `date`, `player_name`, `hit_streak`, `batting_order`, `pitcher_hand`, etc.
+2. Write a management command `cache_statcast` that calls `get_hit_streaks()`, `get_avg_batting_order()`, and related statcast functions and stores results in `StatcastCache` rows for the upcoming game date.
+3. Schedule `cache_statcast` to run nightly at ~2 AM via a cron job (or n8n workflow) — long before any user requests hit the app.
+4. In `get_predictions()`, read from `StatcastCache` instead of calling statcast directly. The web worker never touches raw statcast data again.
+5. This also makes the first page load instant for the day's date instead of waiting 30-60 seconds for statcast to respond.
+
 ---
 
 ## Future Work
@@ -548,3 +575,4 @@ pybaseball sometimes returns names with literal `\xhh` escape sequences instead 
 - Proper position data source (MLB Stats API or a static lookup CSV) — currently shows `Unknown` for all players
 - Support for the upcoming 2026 season once data becomes available
 - Nightly cron job using the `generate_predictions` management command
+- Re-enable hit streak lookup and restore full statcast query windows (30-day hit streaks, 28-day pitcher recent stats) once Railway RAM is upgraded to ≥1GB or statcast data is pre-fetched nightly and cached in the DB instead of pulled on each live request

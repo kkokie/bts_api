@@ -118,7 +118,7 @@ def _normalize_pitcher_team(raw):
     return NAME_TO_ABBR.get(t, FG_TO_BREF_TEAM.get(t, t))
 
 
-def get_pitcher_recent_stats(reference_date, days_back=28):
+def get_pitcher_recent_stats(reference_date, days_back=21):
     """
     Fetch starter pitching stats over a ~28-day window (~4 starts).
     Falls back to full-season stats if the range returns too few starters
@@ -354,7 +354,7 @@ def get_avg_batting_order(start_date, end_date):
         return {}, {}, {}, {}, {}
 
 
-def get_hit_streaks(reference_date, days_back=30):
+def get_hit_streaks(reference_date, days_back=14):
     """
     Returns {player_name: consecutive_game_hit_streak} counting backwards from
     the day before reference_date. Skips days the batter didn't play (off days
@@ -893,9 +893,12 @@ def get_predictions(simulation_date):
     candidates['Score_Breakdown'] = ''
 
     # Fetch batting order early so it can influence scoring
-    order_end = simulation_date - timedelta(days=1)
-    order_start = order_end - timedelta(days=7)
-    batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = get_avg_batting_order(order_start, order_end)
+    # TODO: disabled on Railway hobby plan (512MB RAM) — statcast pull OOM-kills the worker.
+    # Re-enable once RAM is upgraded or statcast is pre-cached nightly (see README long-term fix).
+    # order_end = simulation_date - timedelta(days=1)
+    # order_start = order_end - timedelta(days=7)
+    # batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = get_avg_batting_order(order_start, order_end)
+    batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = {}, {}, {}, {}, {}
     sprint_speed_lookup = get_sprint_speed(simulation_date.year)
 
     # Hot Teams Logic — rank all teams by runs scored in the 7-day window
@@ -1124,7 +1127,10 @@ def get_predictions(simulation_date):
     bullpen_stats, bp_params = get_bullpen_stats(simulation_date)
 
     # Consecutive game hit streaks
-    hit_streak_lookup = get_hit_streaks(simulation_date)
+    # TODO: disabled on Railway hobby plan (512MB RAM) — statcast pull is too large and OOM-kills the worker.
+    # Re-enable once RAM is upgraded or statcast data is fetched/cached differently (e.g. nightly cron, chunked fetch).
+    # hit_streak_lookup = get_hit_streaks(simulation_date)
+    hit_streak_lookup = {}
 
     final_a_list = []
     final_b_list = []
