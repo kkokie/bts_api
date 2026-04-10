@@ -22,10 +22,6 @@
             color: #495057;
             white-space: nowrap;
         }
-        .platoon-adv  { background: #d1e7dd; color: #0f5132; }
-        .platoon-dis  { background: #fff3cd; color: #664d03; }
-        .platoon-none { background: #e9ecef; color: #495057; }
-        .double-down-card { border: 2px solid #0d6efd; }
     </style>
 </head>
 <body class="bg-light">
@@ -35,10 +31,7 @@
         <div class="col text-center">
             <h1 class="display-5 fw-bold">⚾ Beat the Streak AI</h1>
             <p class="lead text-muted">Predicting hits for {{ pretty_date }}</p>
-            <div class="d-flex justify-content-center gap-2 flex-wrap">
-                <a href="/scoring/" class="btn btn-sm btn-outline-secondary">How scores are calculated &rarr;</a>
-                <a href="/accuracy/" class="btn btn-sm btn-outline-primary">Historical Accuracy &rarr;</a>
-            </div>
+            <a href="/scoring/" class="btn btn-sm btn-outline-secondary">How scores are calculated &rarr;</a>
         </div>
     </div>
 
@@ -54,55 +47,10 @@
         </div>
     </div>
 
-    <!-- Double Down Recommendation -->
-    {% if double_down_pair|length == 2 %}
-    <div class="card shadow double-down-card mb-5">
-        <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">⬇️ Double Down Recommendation</h5>
-            <small class="opacity-75">Two independent picks — different game times, both high P(Hit)</small>
-        </div>
-        <div class="card-body">
-            <div class="row g-3">
-                {% for p in double_down_pair %}
-                <div class="col-md-6">
-                    <div class="card h-100 border-primary border-opacity-25">
-                        <div class="card-body">
-                            <h6 class="fw-bold mb-1">
-                                {% if p.lineup_confirmed == False %}
-                                    <span class="text-muted text-decoration-line-through">{{ p.name }}</span>
-                                    <small class="text-danger ms-1">scratched</small>
-                                {% elif p.got_hit %}
-                                    <span class="text-success">{{ p.name }}</span>
-                                {% elif p.got_hit is not None %}
-                                    <span class="text-danger">{{ p.name }}</span>
-                                {% else %}
-                                    {{ p.name }}
-                                {% endif %}
-                                <span class="text-muted fw-normal"> &mdash; {{ p.team }}</span>
-                            </h6>
-                            <div class="mb-1">
-                                <span class="badge bg-primary fs-6">{{ p.score }}%</span>
-                                <small class="text-muted ms-2">
-                                    {% if p.is_home %}vs{% else %}@{% endif %} {{ p.opponent }}
-                                    {% if p.pitcher_hand %}[{{ p.pitcher_hand }}]{% endif %}
-                                    {{ p.probable_pitcher }}
-                                </small>
-                            </div>
-                            {% if p.game_time %}<small class="text-secondary">{{ p.game_time }}</small>{% endif %}
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
     <!-- A-List -->
     <div class="card shadow-sm mb-4 border-success">
         <div class="card-header bg-success text-white">
-            <h5 class="mb-0">⚾ A-List — Recommended Picks</h5>
-            <small class="opacity-75">Opposite hand platoon advantage (LHB vs RHP, RHB vs LHP)</small>
+            <h5 class="mb-0">⚾ Our Model Suggests...</h5>
         </div>
         <div class="card-body p-0">
             <table class="table table-hover mb-0">
@@ -130,11 +78,10 @@
                             <br>
                             <small class="text-muted">Bats {{ p.bats }}</small>
                             <span class="d-inline-flex gap-1 flex-wrap align-items-center ms-1">
-                                {% if p.avg_batting_order %}<span class="meta-chip" data-bs-toggle="tooltip" title="Average lineup position (last 7 days)">#{{ p.avg_batting_order }} lineup</span>{% endif %}
-                                {% if p.team_rank %}<span class="meta-chip" data-bs-toggle="tooltip" title="Team offensive rank by runs scored (last 7 days)">Rank #{{ p.team_rank }}</span>{% endif %}
-                                {% if p.park_factor %}<span class="meta-chip" data-bs-toggle="tooltip" title="Park factor — 100 = league average, higher = more hits">PF {{ p.park_factor }}</span>{% endif %}
-                                {% if p.hit_streak %}<span class="meta-chip" data-bs-toggle="tooltip" title="Consecutive games with at least one hit">{{ p.hit_streak }}G streak{{ p.fire_emojis }}</span>{% endif %}
-                                {% if p.xba %}<span class="meta-chip" data-bs-toggle="tooltip" title="Statcast expected batting average (luck-neutral)">xBA {{ p.xba|floatformat:3 }}</span>{% endif %}
+                                {% if p.avg_batting_order %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Average lineup position (last 7 days)">#{{ p.avg_batting_order }} lineup</span>{% endif %}
+                                {% if p.team_rank %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Team offensive rank by runs scored (last 7 days)">Rank #{{ p.team_rank }}</span>{% endif %}
+                                {% if p.park_factor %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Park factor — 100 is league average, higher means more hits">PF {{ p.park_factor }}</span>{% endif %}
+                                {% if p.hit_streak %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Consecutive games with at least one hit">{{ p.hit_streak }}G streak{{ p.fire_emojis }}</span>{% endif %}
                             </span>
                         </td>
                         <td>
@@ -170,75 +117,84 @@
         </div>
     </div>
 
-    <!-- B-List -->
+    <!-- B-List Toggle -->
     {% if b_list %}
-    <div class="card shadow-sm mb-4 border-warning">
-        <div class="card-header bg-warning text-dark">
-            <h5 class="mb-0">⚠️ B-List — Review Before Picking</h5>
-            <small class="opacity-75">Same hand platoon disadvantage (LHB vs LHP, RHB vs RHP) or unknown pitcher hand</small>
-        </div>
-        <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Player</th>
-                        <th>Matchup</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for p in b_list %}
-                    <tr>
-                        <td>
-                            {% if p.lineup_confirmed == False %}
-                                <strong class="text-muted" style="text-decoration: line-through;">{{ p.name }}</strong>
-                                <small class="text-danger ms-1">not in lineup</small>
-                            {% elif p.got_hit %}
-                                <strong class="text-success">{{ p.name }}</strong>
-                            {% elif p.got_hit is not None %}
-                                <strong class="text-danger">{{ p.name }}</strong>
-                            {% else %}
-                                <strong>{{ p.name }}</strong>
-                            {% endif %}
-                            <span class="text-muted fw-normal"> &mdash; {{ p.team }}</span>
-                            {% if p.notes %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;">{{ p.notes }}</span>{% endif %}
-                            <br>
-                            <small class="text-muted">Bats {{ p.bats }}</small>
-                            <span class="d-inline-flex gap-1 flex-wrap align-items-center ms-1">
-                                {% if p.avg_batting_order %}<span class="meta-chip" data-bs-toggle="tooltip" title="Average lineup position (last 7 days)">#{{ p.avg_batting_order }} lineup</span>{% endif %}
-                                {% if p.team_rank %}<span class="meta-chip" data-bs-toggle="tooltip" title="Team offensive rank by runs scored (last 7 days)">Rank #{{ p.team_rank }}</span>{% endif %}
-                                {% if p.park_factor %}<span class="meta-chip" data-bs-toggle="tooltip" title="Park factor — 100 = league average, higher = more hits">PF {{ p.park_factor }}</span>{% endif %}
-                                {% if p.hit_streak %}<span class="meta-chip" data-bs-toggle="tooltip" title="Consecutive games with at least one hit">{{ p.hit_streak }}G streak{{ p.fire_emojis }}</span>{% endif %}
-                                {% if p.xba %}<span class="meta-chip" data-bs-toggle="tooltip" title="Statcast expected batting average (luck-neutral)">xBA {{ p.xba|floatformat:3 }}</span>{% endif %}
-                            </span>
-                        </td>
-                        <td>
-                            {% if p.is_home %}vs{% else %}@{% endif %} {{ p.opponent }}<br>
-                            <small class="text-muted">
-                                {% if p.pitcher_hand %}[{{ p.pitcher_hand }}] {% endif %}{{ p.probable_pitcher }}
-                                {% if p.pitcher_era is not None %}
-                                &mdash; ERA: {{ p.pitcher_era }} / WHIP: {{ p.pitcher_whip }}
+    <div class="text-center mb-3">
+        <button class="btn btn-sm btn-outline-warning" type="button"
+                data-bs-toggle="collapse" data-bs-target="#bListSection" aria-expanded="false">
+            Not satisfied? Show more options (B-List — {{ b_list.count }} players with platoon disadvantage) &#9660;
+        </button>
+    </div>
+
+    <div class="collapse" id="bListSection">
+        <div class="card shadow-sm mb-4 border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">&#9888; B-List &mdash; Platoon Disadvantage or Unknown Pitcher Hand</h5>
+                <small class="text-dark opacity-75">These players score well but face same-handed pitchers. Use with caution.</small>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Player</th>
+                            <th>Matchup</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in b_list %}
+                        <tr>
+                            <td>
+                                {% if p.lineup_confirmed == False %}
+                                    <strong class="text-muted" style="text-decoration: line-through;">{{ p.name }}</strong>
+                                    <small class="text-danger ms-1">not in lineup</small>
+                                {% elif p.got_hit %}
+                                    <strong class="text-success">{{ p.name }}</strong>
+                                {% elif p.got_hit is not None %}
+                                    <strong class="text-danger">{{ p.name }}</strong>
+                                {% else %}
+                                    <strong>{{ p.name }}</strong>
                                 {% endif %}
-                            </small>
-                            {% if p.stadium %}
-                            <br>
-                            <small class="text-secondary">
-                                {{ p.stadium }}{% if p.game_time %} &mdash; {{ p.game_time }}{% endif %}
-                            </small>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr class="factor-row">
-                        <td colspan="2" class="pb-2">
-                            <div class="d-flex justify-content-between align-items-start gap-2"
-                                 data-breakdown="{{ p.score_breakdown }}">
-                                <div class="batter-badges d-flex flex-wrap gap-1 align-items-center"></div>
-                                <div class="pitcher-badges d-flex flex-wrap gap-1 align-items-center justify-content-end"></div>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                                <span class="text-muted fw-normal"> &mdash; {{ p.team }}</span>
+                                <br>
+                                <small class="text-muted">Bats {{ p.bats }}</small>
+                                <span class="d-inline-flex gap-1 flex-wrap align-items-center ms-1">
+                                    {% if p.avg_batting_order %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Average lineup position (last 7 days)">#{{ p.avg_batting_order }} lineup</span>{% endif %}
+                                    {% if p.team_rank %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Team offensive rank by runs scored (last 7 days)">Rank #{{ p.team_rank }}</span>{% endif %}
+                                    {% if p.park_factor %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Park factor — 100 is league average, higher means more hits">PF {{ p.park_factor }}</span>{% endif %}
+                                    {% if p.hit_streak %}<span class="meta-chip" data-bs-toggle="tooltip" data-bs-placement="top" title="Consecutive games with at least one hit">{{ p.hit_streak }}G streak{{ p.fire_emojis }}</span>{% endif %}
+                                </span>
+                            </td>
+                            <td>
+                                {% if p.is_home %}vs{% else %}@{% endif %} {{ p.opponent }}<br>
+                                <small class="text-muted">
+                                    {% if p.pitcher_hand %}[{{ p.pitcher_hand }}] {% endif %}{{ p.probable_pitcher }}
+                                    {% if p.pitcher_era is not None %}
+                                    &mdash; ERA: {{ p.pitcher_era }} / WHIP: {{ p.pitcher_whip }}
+                                    {% endif %}
+                                </small>
+                                {% if p.stadium %}
+                                <br>
+                                <small class="text-secondary">
+                                    {{ p.stadium }}{% if p.game_time %} &mdash; {{ p.game_time }}{% endif %}
+                                </small>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr class="factor-row">
+                            <td colspan="2" class="pb-2">
+                                <div class="d-flex justify-content-between align-items-start gap-2"
+                                     data-breakdown="{{ p.score_breakdown }}">
+                                    <div class="batter-badges d-flex flex-wrap gap-1 align-items-center"></div>
+                                    <div class="pitcher-badges d-flex flex-wrap gap-1 align-items-center justify-content-end"></div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="text-center py-3">No B-List candidates.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
     {% endif %}
@@ -248,17 +204,20 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     var PITCHER_PREFIXES = ['P.H', 'P.ERA', 'P.BB', 'P.IP', 'BP'];
-    var SKIP_PREFIXES    = ['Team Rank', 'Lineup', 'Park', 'BA:', 'Matchup'];
+    var SKIP_PREFIXES    = ['Team Rank', 'Lineup', 'Park', 'Matchup'];
 
     var TOOLTIPS = {
-        'P(Hit)': 'Probability of getting at least one hit today. Bernoulli model: 1-(1-BA_eff)^(AB/G).',
-        'BA:':    'Weighted batting average (last 7 days, recent 4d double-weighted).',
-        'xBA:':   'Statcast expected BA — based on exit velocity and launch angle. More stable than raw BA.',
-        'HH%:':   'Hard hit rate — % of batted balls at 95+ mph exit velocity.',
-        'K%':     'Strikeout rate last 7 days. Lower = better contact.',
+        'P(Hit)': 'Estimated probability of getting a hit based on weighted BA, xBA, lineup position, and park factor.',
+        'H:':     'Projected hits per 7-game week based on recent batting average. Higher = hotter bat.',
+        'BA:':    'Weighted batting average over the last 7 days (last 4 days count double).',
+        'xBA:':   'Expected batting average from Statcast (quality of contact). More stable than actual BA.',
+        'HH%:':   'Hard hit rate — % of balls hit 95+ mph (Statcast). Higher = better contact quality.',
+        'K%':     'Strikeout rate last 7 days. Lower = better contact. Shown as z-score vs pool average.',
+        'BB%:':   'Walk rate last 7 days. Higher = more patient hitter / draws more pitches.',
+        'Speed:': 'Sprint speed (ft/s) from Statcast. Faster runners reach more infield singles. > 30 ft/s boosts score, < 25 ft/s lowers it.',
         'P.H':    'Hits allowed by opposing starter (last ~4 starts). Higher = easier matchup.',
         'P.ERA':  'ERA of opposing starter (last ~4 starts). Higher = easier matchup.',
-        'P.BB':   'Walks issued by opposing starter (last ~4 starts). High = more pass chances.',
+        'P.BB':   'Walks issued by opposing starter (last ~4 starts). Higher = wilder pitcher.',
         'P.IP':   'Innings pitched by opposing starter (last ~4 starts).',
         'BP':     'Hits allowed by opponent\'s bullpen (last 15 days). Higher = weaker bullpen.',
     };
@@ -275,39 +234,15 @@
     }
 
     function badgeClass(factor) {
-        // P(Hit) — colored by percentage value
-        if (factor.startsWith('P(Hit)')) {
-            var m = factor.match(/([\d.]+)%/);
+        if (factor.startsWith('H:')) {
+            var m = factor.match(/([\+\-]?[\d.]+)σ/);
             if (m) {
-                var pct = parseFloat(m[1]);
-                if (pct >= 75) return 'bg-primary';
-                if (pct >= 65) return 'bg-success';
-                if (pct >= 55) return 'bg-warning text-dark';
-                if (pct >= 45) return 'bg-orange';
+                var z = parseFloat(m[1]);
+                if (z >= 2)  return 'bg-primary';
+                if (z >= 1)  return 'bg-success';
+                if (z >= 0)  return 'bg-warning text-dark';
+                if (z >= -1) return 'bg-orange';
                 return 'bg-danger';
-            }
-        }
-
-        // HH% — hard hit rate colored by value
-        if (factor.startsWith('HH%')) {
-            var m = factor.match(/([\d.]+)%/);
-            if (m) {
-                var pct = parseFloat(m[1]);
-                if (pct >= 50) return 'bg-primary';
-                if (pct >= 40) return 'bg-success';
-                if (pct >= 30) return 'bg-warning text-dark';
-                return 'bg-orange';
-            }
-        }
-
-        if (factor.startsWith('xBA')) {
-            var m = factor.match(/([\d.]+)/);
-            if (m) {
-                var v = parseFloat(m[1]);
-                if (v >= 0.300) return 'bg-primary';
-                if (v >= 0.270) return 'bg-success';
-                if (v >= 0.240) return 'bg-warning text-dark';
-                return 'bg-orange';
             }
         }
 
@@ -348,7 +283,7 @@
             var pitcherDiv = container.querySelector('.pitcher-badges');
 
             raw.split(' | ').filter(Boolean).forEach(function (factor) {
-                // Skip meta-chip items shown elsewhere in the row
+                // Team Rank, Lineup, Park are shown as meta-chips — skip here
                 if (SKIP_PREFIXES.some(function(p) { return factor.startsWith(p); })) return;
 
                 var badge = document.createElement('span');
@@ -370,7 +305,7 @@
             });
         });
 
-        // Init Bootstrap tooltips
+        // Init Bootstrap tooltips (badges + meta-chips)
         document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
             new bootstrap.Tooltip(el);
         });

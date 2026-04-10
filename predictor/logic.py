@@ -2,8 +2,8 @@ import re
 import unicodedata
 import requests
 import pandas as pd
-from pybaseball import batting_stats_range, batting_stats, schedule_and_record, pitching_stats, pitching_stats_range, statcast, playerid_reverse_lookup
-from datetime import datetime, timedelta
+from pybaseball import batting_stats_range, batting_stats, schedule_and_record, pitching_stats, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
+from datetime import datetime, timedelta, date as date_class, timezone
 
 # --- CONFIGURATION ---
 SEASON = 2026
@@ -18,6 +18,21 @@ NAME_TO_ABBR = {
     'Philadelphia': 'PHI', 'Pittsburgh': 'PIT', 'San Diego': 'SD', 'San Francisco': 'SF',
     'Seattle': 'SEA', 'St. Louis': 'STL', 'Tampa Bay': 'TB', 'Texas': 'TEX',
     'Toronto': 'TOR', 'Washington': 'WSH'
+}
+
+# MLB Stats API returns full team names — map to our internal abbreviations
+MLB_FULLNAME_TO_ABBR = {
+    'Arizona Diamondbacks': 'ARI', 'Atlanta Braves': 'ATL', 'Baltimore Orioles': 'BAL',
+    'Boston Red Sox': 'BOS', 'Chicago White Sox': 'CWS', 'Chicago Cubs': 'CHC',
+    'Cincinnati Reds': 'CIN', 'Cleveland Guardians': 'CLE', 'Colorado Rockies': 'COL',
+    'Detroit Tigers': 'DET', 'Houston Astros': 'HOU', 'Kansas City Royals': 'KC',
+    'Los Angeles Angels': 'LAA', 'Los Angeles Dodgers': 'LAD', 'Miami Marlins': 'MIA',
+    'Milwaukee Brewers': 'MIL', 'Minnesota Twins': 'MIN', 'New York Yankees': 'NYY',
+    'New York Mets': 'NYM', 'Oakland Athletics': 'OAK', 'Athletics': 'OAK',
+    'Philadelphia Phillies': 'PHI', 'Pittsburgh Pirates': 'PIT', 'San Diego Padres': 'SD',
+    'San Francisco Giants': 'SF', 'Seattle Mariners': 'SEA', 'St. Louis Cardinals': 'STL',
+    'Tampa Bay Rays': 'TB', 'Texas Rangers': 'TEX', 'Toronto Blue Jays': 'TOR',
+    'Washington Nationals': 'WSH',
 }
 
 # FanGraphs uses slightly different abbreviations than baseball-reference
@@ -106,6 +121,8 @@ def _normalize_pitcher_team(raw):
 def get_pitcher_recent_stats(reference_date, days_back=28):
     """
     Fetch starter pitching stats over a ~28-day window (~4 starts).
+    Falls back to full-season stats if the range returns too few starters
+    (e.g. early in the season when the window hits spring training).
     Returns (lookup, h_params, era_params, bb_params, ip_params)
       lookup: {(last_name_lower, team_abbr): {H, ERA, BB, IP}}
       *_params: (mean, std) for z-scoring across the pitcher pool.
@@ -113,13 +130,15 @@ def get_pitcher_recent_stats(reference_date, days_back=28):
     end = reference_date - timedelta(days=1)
     start = end - timedelta(days=days_back)
     print(f"  [DEBUG] Fetching pitcher recent stats ({start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')})...")
-    try:
-        df = pitching_stats_range(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
+
+    def _build_lookup(df):
+        # FanGraphs uses 'Team', BRef range uses 'Tm' — handle both
+        if 'Tm' not in df.columns and 'Team' in df.columns:
+            df = df.rename(columns={'Team': 'Tm'})
         BAD = {'TOT', '2TM', '3TM', '---', ''}
         df = df[~df['Tm'].astype(str).str.strip().isin(BAD)].copy()
         if 'GS' in df.columns:
             df = df[df['GS'] > 0].copy()
-
         lookup = {}
         for _, row in df.iterrows():
             name = str(row.get('Name', '')).strip()
@@ -127,27 +146,45 @@ def get_pitcher_recent_stats(reference_date, days_back=28):
                 continue
             last_name = name.split()[-1].lower()
             team = _normalize_pitcher_team(row.get('Tm', ''))
-            key = (last_name, team)
-            lookup[key] = {
+            lookup[(last_name, team)] = {
                 'H':   row.get('H'),
                 'ERA': row.get('ERA'),
                 'BB':  row.get('BB'),
                 'IP':  row.get('IP'),
             }
+        return lookup
 
-        def _params(stat):
-            vals = [v[stat] for v in lookup.values()
-                    if v[stat] is not None and not pd.isna(v[stat])]
-            if len(vals) < 2:
-                return (0.0, 1.0)
-            s = pd.Series(vals)
-            return (float(s.mean()), max(float(s.std()), 0.1))
+    def _params(lookup, stat):
+        vals = [v[stat] for v in lookup.values()
+                if v[stat] is not None and not pd.isna(v[stat])]
+        if len(vals) < 2:
+            return (0.0, 1.0)
+        s = pd.Series(vals)
+        return (float(s.mean()), max(float(s.std()), 0.1))
 
-        print(f"  [DEBUG] Pitcher recent stats: {len(lookup)} starters.")
-        return lookup, _params('H'), _params('ERA'), _params('BB'), _params('IP')
+    # Attempt 1: date range
+    lookup = {}
+    try:
+        df = pitching_stats_range(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
+        lookup = _build_lookup(df)
+        print(f"  [DEBUG] Pitcher recent stats (range): {len(lookup)} starters.")
     except Exception as e:
-        print(f"  [DEBUG] ❌ CRASH in get_pitcher_recent_stats: {e}")
-        return {}, (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0)
+        print(f"  [DEBUG] ⚠️ Pitcher range fetch failed ({e}).")
+
+    # Fallback: full season if range returned too few starters
+    if len(lookup) < 10:
+        print(f"  [DEBUG] ⚠️ Too few pitchers from range, falling back to full season stats.")
+        for try_season in [reference_date.year, reference_date.year - 1]:
+            try:
+                df = pitching_stats(try_season)
+                if not df.empty:
+                    lookup = _build_lookup(df)
+                    print(f"  [DEBUG] ✅ Pitcher fallback: {len(lookup)} starters from {try_season} season.")
+                    break
+            except Exception as e2:
+                print(f"  [DEBUG] ⚠️ Pitcher season {try_season} fallback failed: {e2}")
+
+    return lookup, _params(lookup, 'H'), _params(lookup, 'ERA'), _params(lookup, 'BB'), _params(lookup, 'IP')
 
 
 def get_bullpen_stats(reference_date, days_back=15):
@@ -478,10 +515,10 @@ def get_window_stats(days_back, reference_date):
         print(f"  [DEBUG] ✅ Success! Found granular data for {days_back}d window.")
 
     except (IndexError, ValueError, Exception) as e:
-        # ATTEMPT 2 & 3: Fallback to Full Season (FanGraphs), try current then prior season
+        # ATTEMPT 2 & 3: Fallback to Full Season (FanGraphs), try date's year then prior year
         print(f"  [DEBUG] ⚠️ Range fetch failed ({e}). Falling back to FULL SEASON stats.")
         df = pd.DataFrame()
-        for try_season in [SEASON, SEASON - 1]:
+        for try_season in [reference_date.year, reference_date.year - 1]:
             try:
                 df = batting_stats(try_season)
                 if not df.empty:
@@ -584,51 +621,149 @@ def get_matchup_info(team_name, game_date):
 
             return opponent, pitcher, game_time, is_home
         return "Off Day", "N/A", "", True
-    except:
+    except Exception as e:
+        print(f"  [DEBUG] ❌ get_matchup_info({team_name}, {game_date.date()}): {e}")
         return "Unknown", "Unknown", "", True
+
+
+def _mlb_team_name_to_abbr(name):
+    """Convert MLB Stats API full team name to our internal abbreviation."""
+    return MLB_FULLNAME_TO_ABBR.get(name, NAME_TO_ABBR.get(name, name))
+
+
+def _get_boxscore_starters(game_pk):
+    """Fetch actual starting pitchers for a completed game via MLB Stats API boxscore."""
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/game/{game_pk}/boxscore"
+        data = requests.get(url, timeout=10).json()
+        result = {}
+        for side in ('home', 'away'):
+            team_data = data.get('teams', {}).get(side, {})
+            pitchers = team_data.get('pitchers', [])
+            if pitchers:
+                starter_id = pitchers[0]
+                player = team_data.get('players', {}).get(f'ID{starter_id}', {})
+                name = player.get('person', {}).get('fullName', '')
+                hand_code = (player.get('person', {}).get('pitchHand', {}) or {}).get('code', '')
+                if hand_code == 'S':
+                    hand_code = ''
+                team_name = data.get('teams', {}).get(side, {}).get('team', {}).get('name', '')
+                abbr = _mlb_team_name_to_abbr(team_name)
+                if abbr and name:
+                    result[abbr] = (name, hand_code)
+        return result
+    except Exception:
+        return {}
+
+
+def get_all_matchups(game_date):
+    """
+    Fetch all matchups for a date from the MLB Stats API.
+    - Future/today: uses probablePitcher field
+    - Past games: fetches boxscore for actual starting pitcher
+    Returns {team_abbr: (opponent_abbr, pitcher_name, game_time, is_home)}.
+    """
+    date_str = game_date.strftime('%Y-%m-%d')
+    is_past = game_date.date() < date_class.today()
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher"
+    print(f"  [DEBUG] Fetching all matchups from MLB API for {date_str}...")
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        result = {}
+        for date_obj in data.get('dates', []):
+            for game in date_obj.get('games', []):
+                home_info = game.get('teams', {}).get('home', {})
+                away_info = game.get('teams', {}).get('away', {})
+                home_abbr = _mlb_team_name_to_abbr(home_info.get('team', {}).get('name', ''))
+                away_abbr = _mlb_team_name_to_abbr(away_info.get('team', {}).get('name', ''))
+                if not home_abbr or not away_abbr:
+                    continue
+
+                # Game time from gameDate (UTC ISO string)
+                game_time = ''
+                game_dt_str = game.get('gameDate', '')
+                if game_dt_str:
+                    try:
+                        utc_dt = datetime.strptime(game_dt_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+                        et_dt = utc_dt + timedelta(hours=-4)  # EDT
+                        game_time = et_dt.strftime('%-I:%M %p') + ' ET'
+                    except Exception:
+                        pass
+
+                if is_past:
+                    # For completed games, get actual starters from boxscore
+                    starters = _get_boxscore_starters(game['gamePk'])
+                    home_pitcher = starters.get(home_abbr, ('TBD', ''))[0]
+                    away_pitcher = starters.get(away_abbr, ('TBD', ''))[0]
+                else:
+                    # For upcoming games, use announced probable pitchers
+                    home_pitcher = (home_info.get('probablePitcher') or {}).get('fullName', 'TBD') or 'TBD'
+                    away_pitcher = (away_info.get('probablePitcher') or {}).get('fullName', 'TBD') or 'TBD'
+
+                result[home_abbr] = (away_abbr, away_pitcher, game_time, True)
+                result[away_abbr] = (home_abbr, home_pitcher, game_time, False)
+
+        print(f"  [DEBUG] MLB API matchups: {len(result) // 2} games found.")
+        return result
+    except Exception as e:
+        print(f"  [DEBUG] ❌ CRASH in get_all_matchups: {e}")
+        return {}
 
 
 def get_probable_pitchers(game_date):
     """
     Fetches probable pitchers from MLB Stats API for game_date.
     Returns {team_abbr: (pitcher_full_name, pitcher_hand)} for both home and away teams.
-    Pitcher hand is the first initial of ThrowingHand if available, else ''.
+    Batch-fetches pitcher hand from the people API since the schedule endpoint
+    doesn't include pitchHand in the probablePitcher object.
     """
     date_str = game_date.strftime('%Y-%m-%d')
-    url = (
-        f"https://statsapi.mlb.com/api/v1/schedule"
-        f"?sportId=1&date={date_str}&hydrate=probablePitcher"
-    )
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}&hydrate=probablePitcher"
     print(f"  [DEBUG] Fetching probable pitchers for {date_str}...")
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
-        result = {}
+        # First pass: collect (team_abbr, pitcher_id, pitcher_name)
+        entries = []
         for date_obj in data.get('dates', []):
             for game in date_obj.get('games', []):
                 for side in ('home', 'away'):
                     team_info = game.get('teams', {}).get(side, {})
-                    abbr = team_info.get('team', {}).get('abbreviation', '')
-                    probable = team_info.get('probablePitcher', {})
-                    if abbr and probable:
-                        name = probable.get('fullName', '')
-                        # pitchHand is nested under pitchHand.code: 'R', 'L', 'S'
-                        hand_info = probable.get('pitchHand', {})
-                        hand = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
-                        if hand == 'S':
-                            hand = ''  # switch pitcher — treat as unknown
-                        if name:
-                            result[abbr] = (name, hand)
+                    abbr = _mlb_team_name_to_abbr(team_info.get('team', {}).get('name', ''))
+                    probable = team_info.get('probablePitcher') or {}
+                    name = probable.get('fullName', '')
+                    pid = probable.get('id')
+                    if abbr and name and pid:
+                        entries.append((abbr, pid, name))
 
-        # Normalize abbreviations to our internal keys
-        MLB_TO_BREF = {
-            'CHW': 'CWS', 'KCR': 'KC', 'SFG': 'SF', 'SDP': 'SD',
-            'TBR': 'TB', 'WSN': 'WSH', 'ATH': 'OAK',
-        }
-        result = {MLB_TO_BREF.get(k, k): v for k, v in result.items()}
-        print(f"  [DEBUG] Probable pitchers: {len(result)} games with pitchers announced.")
+        if not entries:
+            print(f"  [DEBUG] Probable pitchers: 0 teams with pitchers announced.")
+            return {}
+
+        # Batch-fetch pitcher hand from people API (one call for all pitchers)
+        all_ids = ','.join(str(e[1]) for e in entries)
+        people_resp = requests.get(
+            f"https://statsapi.mlb.com/api/v1/people?personIds={all_ids}",
+            timeout=10
+        )
+        hand_by_id = {}
+        if people_resp.ok:
+            for person in people_resp.json().get('people', []):
+                pid = person.get('id')
+                hand_info = person.get('pitchHand', {})
+                code = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
+                hand_by_id[pid] = '' if code == 'S' else code
+
+        result = {}
+        for abbr, pid, name in entries:
+            hand = hand_by_id.get(pid, '')
+            result[abbr] = (name, hand)
+
+        print(f"  [DEBUG] Probable pitchers: {len(result)} teams with pitchers announced.")
         return result
     except Exception as e:
         print(f"  [DEBUG] ❌ CRASH in get_probable_pitchers: {e}")
@@ -690,6 +825,51 @@ def get_lineup_status(game_date):
         return {}, set()
 
 
+def get_sprint_speed(season):
+    """
+    Fetch sprint speed leaderboard from Statcast for the given season.
+    Returns {player_name: sprint_speed_ft_per_sec}.
+    Falls back to prior season if current season data unavailable.
+    """
+    def ascii_normalize(s):
+        return unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode()
+
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Fetching sprint speed for {try_season}...")
+        try:
+            df = statcast_sprint_speed(try_season, min_opp=0)
+            if df is None or df.empty:
+                continue
+            result = {}
+            name_col = next((c for c in df.columns if 'name' in c.lower()), None)
+            speed_col = 'sprint_speed' if 'sprint_speed' in df.columns else None
+            if not name_col or not speed_col:
+                print(f"  [DEBUG] ⚠️ Sprint speed missing expected columns: {list(df.columns)}")
+                continue
+            for _, row in df.iterrows():
+                name_raw = str(row.get(name_col, '')).strip()
+                if not name_raw:
+                    continue
+                # Statcast returns "Last, First" — convert to "First Last"
+                if ',' in name_raw:
+                    parts = name_raw.split(',', 1)
+                    full_name = f"{parts[1].strip()} {parts[0].strip()}"
+                else:
+                    full_name = name_raw
+                full_name = clean_name_string(full_name)
+                speed = row.get(speed_col)
+                if speed is not None and not pd.isna(speed):
+                    result[full_name] = float(speed)
+                    ascii_key = ascii_normalize(full_name)
+                    if ascii_key != full_name:
+                        result[ascii_key] = float(speed)
+            print(f"  [DEBUG] Sprint speed: {len(result)} players from {try_season}.")
+            return result
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ Sprint speed {try_season} failed: {e}")
+    return {}
+
+
 def get_predictions(simulation_date):
     print(f"\n--- 🕵️‍♂️ STARTING DEBUG ANALYSIS FOR: {simulation_date.strftime('%Y-%m-%d')} ---")
 
@@ -700,9 +880,11 @@ def get_predictions(simulation_date):
         print("  [DEBUG] 🛑 STOPPING: 7-Day Data is empty.")
         return [], []
 
-        # Filter candidates — 15 PA minimum to exclude backup/callup noise
-    # while staying usable in the first week (3 games × ~4 PA = 12 PA for a starter)
-    candidates = df_7d[(df_7d['PA'] >= 15)].copy()
+        # Filter candidates — dynamic PA minimum: 15 normally, 3 in first two weeks of season
+    # when full-season fallback data has very low PA counts
+    max_pa = df_7d['PA'].max() if 'PA' in df_7d.columns else 100
+    pa_threshold = 3 if max_pa < 20 else 15
+    candidates = df_7d[(df_7d['PA'] >= pa_threshold)].copy()
 
     if 'K%' in candidates.columns:
         candidates = candidates[(candidates['K%'] < 25.0)].copy()
@@ -714,6 +896,7 @@ def get_predictions(simulation_date):
     order_end = simulation_date - timedelta(days=1)
     order_start = order_end - timedelta(days=7)
     batting_order_lookup, pitcher_hand_lookup, xba_lookup, hard_hit_lookup, batter_hand_lookup = get_avg_batting_order(order_start, order_end)
+    sprint_speed_lookup = get_sprint_speed(simulation_date.year)
 
     # Hot Teams Logic — rank all teams by runs scored in the 7-day window
     hot_teams = []
@@ -789,6 +972,16 @@ def get_predictions(simulation_date):
             elif hard_hit < 0.28:
                 ba_effective *= 0.98
 
+        # Sprint speed adjustment (Statcast ft/s)
+        speed = sprint_speed_lookup.get(name) or sprint_speed_lookup.get(ascii_name)
+        if speed is not None:
+            if speed > 30.0:
+                ba_effective *= 1.03
+            elif speed > 28.0:
+                ba_effective *= 1.015
+            elif speed < 25.0:
+                ba_effective *= 0.98
+
         # Team offensive environment
         rank = team_rank.get(str(row['Tm']).strip())
         if row['Tm'] in hot_teams:
@@ -812,6 +1005,15 @@ def get_predictions(simulation_date):
         if hard_hit is not None:
             breakdown.append(f"HH%: {round(hard_hit * 100)}%")
         breakdown.append(f"K%: {round(k_pct, 1)}% ({k_z:+.1f}σ)")
+        # BB% (walk rate) — display only
+        bb_pct = None
+        if 'BB' in row and 'PA' in row and pd.notna(row.get('BB')) and pd.notna(row.get('PA')) and float(row.get('PA', 0)) > 0:
+            bb_pct = round(float(row['BB']) / float(row['PA']) * 100, 1)
+        if bb_pct is not None:
+            breakdown.append(f"BB%: {bb_pct}%")
+        # Sprint speed — display only
+        if speed is not None:
+            breakdown.append(f"Speed: {speed:.1f} ft/s")
         if rank is not None:
             breakdown.append(f"Team Rank: #{rank}")
         if avg_order is not None:
@@ -859,20 +1061,60 @@ def get_predictions(simulation_date):
 
     merged['Tm'] = merged.apply(lambda r: resolve_team(r['Name'], r['Tm']), axis=1)
 
-    # Batch schedule lookups — one HTTP request per unique team, not per player
+    # Build matchup cache — try MLB Stats API first (works for current/future season),
+    # fall back to per-team BRef schedule_and_record for past seasons
     unique_teams = merged['Tm'].dropna().unique().tolist()
-    matchup_cache = {team: get_matchup_info(team, simulation_date) for team in unique_teams}  # → (opp, pitcher, time, is_home)
+    mlb_matchups = get_all_matchups(simulation_date)
+    if mlb_matchups:
+        matchup_cache = {team: mlb_matchups.get(team, ("Off Day", "N/A", "", True)) for team in unique_teams}
+        # Inject pitcher hands from MLB API matchups
+        for team, (opp, pitcher, game_time, is_home) in matchup_cache.items():
+            if pitcher and pitcher not in ('TBD', 'N/A', 'Unknown'):
+                last = pitcher.split()[-1].lower()
+                # Try to get hand from probable_pitchers (fetched separately with hand info)
+    else:
+        # Fallback: per-team BRef calls (works for past seasons)
+        matchup_cache = {team: get_matchup_info(team, simulation_date) for team in unique_teams}
 
-    # Supplement BRef schedule with MLB Stats API probable pitchers for upcoming games
+    # Supplement with MLB Stats API probable pitchers (has throwing hand info)
     probable_pitchers = get_probable_pitchers(simulation_date)
     for team, (opp, pitcher, game_time, is_home) in list(matchup_cache.items()):
-        if pitcher == 'TBD' and team in probable_pitchers:
+        if pitcher in ('TBD', 'N/A', 'Unknown') and team in probable_pitchers:
             pp_name, pp_hand = probable_pitchers[team]
             matchup_cache[team] = (opp, pp_name, game_time, is_home)
-            # Inject hand into pitcher_hand_lookup keyed by last name (lowercase)
+        if team in probable_pitchers:
+            pp_name, pp_hand = probable_pitchers[team]
             if pp_hand and pp_name:
                 last = pp_name.split()[-1].lower()
                 pitcher_hand_lookup[last] = pp_hand
+
+    # Final fallback: for any pitcher in today's matchups whose hand is still unknown,
+    # look them up from the MLB people API by name search
+    unknown_pitchers = set()
+    for team, (opp, pitcher, game_time, is_home) in matchup_cache.items():
+        if pitcher and pitcher not in ('TBD', 'N/A', 'Unknown'):
+            last = pitcher.split()[-1].lower()
+            if last not in pitcher_hand_lookup:
+                unknown_pitchers.add(pitcher)
+    if unknown_pitchers:
+        print(f"  [DEBUG] Looking up hand for {len(unknown_pitchers)} unknown pitcher(s)...")
+        for pitcher_name in unknown_pitchers:
+            try:
+                r = requests.get(
+                    f"https://statsapi.mlb.com/api/v1/people/search?names={requests.utils.quote(pitcher_name)}&sportId=1",
+                    timeout=5
+                )
+                people = r.json().get('people', [])
+                if people:
+                    person = people[0]
+                    hand_info = person.get('pitchHand', {})
+                    code = hand_info.get('code', '') if isinstance(hand_info, dict) else ''
+                    if code and code != 'S':
+                        last = pitcher_name.split()[-1].lower()
+                        pitcher_hand_lookup[last] = code
+                        print(f"  [DEBUG] Found hand for {pitcher_name}: {code}")
+            except Exception:
+                pass
 
     # One FanGraphs call for all pitcher stats
     pitcher_lookup = get_pitcher_stats(SEASON)

@@ -5,10 +5,7 @@
     <title>Scoring Guide — Beat the Streak AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        .section-header {
-            border-left: 4px solid #0d6efd;
-            padding-left: 0.75rem;
-        }
+        .section-header { border-left: 4px solid #0d6efd; padding-left: 0.75rem; }
         .formula-box {
             background: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -16,22 +13,21 @@
             font-family: monospace;
             font-size: 0.95rem;
             padding: 1rem 1.25rem;
-            line-height: 1.8;
         }
         .max-badge { font-size: 0.75rem; }
     </style>
 </head>
 <body class="bg-light">
 
-<div class="container py-5" style="max-width: 900px;">
+<div class="container py-5" style="max-width: 860px;">
 
     <div class="mb-4">
         <a href="/" class="btn btn-sm btn-outline-secondary mb-3">&larr; Back to Dashboard</a>
         <h1 class="display-6 fw-bold">How Scores Are Calculated</h1>
         <p class="text-muted">
-            Every candidate's score is a <strong>P(Hit) percentage</strong> — the estimated probability
-            that the player gets at least one hit today. A score of <strong>72%</strong> means the model
-            estimates a 72% chance of a hit. This directly maps to the Beat the Streak objective.
+            Every player is scored as a <strong>P(Hit)</strong> — the estimated probability of getting
+            at least one hit in today's game. Scores are displayed as a percentage (e.g. 74.2%).
+            Higher = stronger pick.
         </p>
     </div>
 
@@ -41,7 +37,7 @@
             <h5 class="mb-0">Step 1 &mdash; Candidate Filters <span class="badge bg-light text-dark ms-2">Applied before scoring</span></h5>
         </div>
         <div class="card-body">
-            <p class="text-muted mb-3">Players must pass both filters to be considered.</p>
+            <p class="text-muted mb-3">Players must pass both filters to be considered. Weeds out bench players and free-swingers.</p>
             <table class="table table-bordered mb-0">
                 <thead class="table-light">
                     <tr><th>Filter</th><th>Threshold</th><th>Why</th></tr>
@@ -49,136 +45,135 @@
                 <tbody>
                     <tr>
                         <td>Plate Appearances (last 7 days)</td>
-                        <td><strong>&ge; 15 PA</strong></td>
-                        <td>Excludes bench players, injured players, and too-small samples</td>
+                        <td><strong>&ge; 15 PA</strong> <small class="text-muted">(3 early season)</small></td>
+                        <td>Excludes injured, benched, or too-small sample players. Threshold lowers in the first two weeks of the season.</td>
                     </tr>
                     <tr>
                         <td>Strikeout Rate (last 7 days)</td>
                         <td><strong>&lt; 25% K%</strong></td>
-                        <td>High K% batters make less contact; fewer official ABs hurts hit probability</td>
+                        <td>High strikeout hitters make less contact — riskier for Beat the Streak.</td>
                     </tr>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Step 2: Effective BA Construction -->
+    <!-- Step 2: Building Effective BA -->
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">Step 2 &mdash; Effective Batting Average (BA_eff)</h5>
+            <h5 class="mb-0">Step 2 &mdash; Building Effective Batting Average (BA<sub>eff</sub>)</h5>
         </div>
         <div class="card-body">
-            <p class="text-muted">The effective BA is a blended, adjusted measure of how likely this player is to get a hit per at-bat. Three layers of refinement:</p>
+            <p class="text-muted">The model doesn't use raw BA directly. It builds a layered estimate of a player's true hitting ability.</p>
 
-            <table class="table table-bordered mb-4">
-                <thead class="table-light">
-                    <tr><th>Layer</th><th>Method</th><th>Rationale</th></tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><strong>1. Exponential-Decay BA</strong></td>
-                        <td class="font-monospace">
-                            weighted_BA = (H_4d &times; 2 + H_older) &divide; (AB_4d &times; 2 + AB_older)
-                        </td>
-                        <td>Recent games (last 4 days) are weighted 2× vs days 5–7. A batter who's hot right now scores higher than one who cooled off this week.</td>
-                    </tr>
-                    <tr>
-                        <td><strong>2. xBA Blend</strong></td>
-                        <td class="font-monospace">
-                            blended = 0.55 &times; xBA + 0.45 &times; weighted_BA
-                        </td>
-                        <td>Statcast xBA (expected BA based on exit velocity + launch angle) is a luck-neutral predictor. Blending 55/45 reduces noise from BABIP variance.</td>
-                    </tr>
-                    <tr>
-                        <td><strong>3. Contextual Adjustments</strong></td>
-                        <td>See table below</td>
-                        <td>Final multipliers applied to BA_eff before the probability calculation.</td>
-                    </tr>
-                </tbody>
-            </table>
+            <h6 class="section-header mt-3 mb-2">2a. Exponential-Decay Weighted BA</h6>
+            <p class="text-muted small">Recent performance matters more. The last 4 days count <strong>2×</strong>, the prior 3 days count <strong>1×</strong>.</p>
+            <div class="formula-box mb-3">
+                BA_weighted = (H_last4d &times; 2 + H_days5to7) / (AB_last4d &times; 2 + AB_days5to7)
+            </div>
 
-            <p class="fw-semibold mb-2">Contextual adjustments (multiplicative):</p>
+            <h6 class="section-header mt-3 mb-2">2b. xBA Blend (Statcast)</h6>
+            <p class="text-muted small">Expected BA (xBA) measures quality of contact and is more stable than actual BA — it strips out luck. When available, it's blended in at 55%.</p>
+            <div class="formula-box mb-3">
+                BA_eff = 0.55 &times; xBA + 0.45 &times; BA_weighted
+                <br><span class="text-muted">(BA_weighted used alone if xBA unavailable)</span>
+            </div>
+
+            <h6 class="section-header mt-3 mb-2">2c. Adjustments to BA<sub>eff</sub></h6>
             <table class="table table-bordered mb-0">
                 <thead class="table-light">
-                    <tr><th>Factor</th><th>Condition</th><th>Multiplier</th></tr>
+                    <tr><th>Factor</th><th>Adjustment</th><th>Condition</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td>Elite contact (K%)</td><td>K% &lt; 12%</td><td class="text-success fw-bold">&times; 1.04</td></tr>
-                    <tr><td>Free swinger (K%)</td><td>K% &gt; 22%</td><td class="text-danger fw-bold">&times; 0.97</td></tr>
-                    <tr><td>High hard-hit rate</td><td>HH% &gt; 45%</td><td class="text-success fw-bold">&times; 1.02</td></tr>
-                    <tr><td>Low hard-hit rate</td><td>HH% &lt; 28%</td><td class="text-danger fw-bold">&times; 0.98</td></tr>
-                    <tr><td>Hot team</td><td>Team in top 10 runs scored (7d)</td><td class="text-success fw-bold">&times; 1.02</td></tr>
+                    <tr>
+                        <td>Elite contact (K%)</td>
+                        <td><span class="text-success">+4% to BA_eff</span></td>
+                        <td>K% &lt; 12% — rarely strikes out, great contact</td>
+                    </tr>
+                    <tr>
+                        <td>Free swinger (K%)</td>
+                        <td><span class="text-danger">&minus;3% to BA_eff</span></td>
+                        <td>K% &gt; 22% — elevated strikeout risk</td>
+                    </tr>
+                    <tr>
+                        <td>Hard hit rate (HH%)</td>
+                        <td><span class="text-success">+2% to BA_eff</span></td>
+                        <td>Hard hit% &gt; 45% (Statcast: &ge;95 mph)</td>
+                    </tr>
+                    <tr>
+                        <td>Soft contact (HH%)</td>
+                        <td><span class="text-danger">&minus;2% to BA_eff</span></td>
+                        <td>Hard hit% &lt; 28%</td>
+                    </tr>
+                    <tr>
+                        <td>Sprint Speed</td>
+                        <td>
+                            <span class="text-success">+3% to BA_eff</span> if &gt;30 ft/s<br>
+                            <span class="text-success">+1.5% to BA_eff</span> if &gt;28 ft/s<br>
+                            <span class="text-danger">&minus;2% to BA_eff</span> if &lt;25 ft/s
+                        </td>
+                        <td>Fast runners beat out more infield singles and reach on errors. Statcast sprint speed leaderboard.</td>
+                    </tr>
+                    <tr>
+                        <td>Hot team offense</td>
+                        <td><span class="text-success">+2% to BA_eff</span></td>
+                        <td>Team in top 10 for runs scored (last 7 days)</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Step 3: Probability Formula -->
+    <!-- Step 3: P(Hit) -->
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-success text-white">
-            <h5 class="mb-0">Step 3 &mdash; P(Hit) Probability Formula</h5>
+            <h5 class="mb-0">Step 3 &mdash; P(Hit): Probability of Getting a Hit</h5>
         </div>
         <div class="card-body">
-            <p class="text-muted">
-                The goal of Beat the Streak is to pick someone who gets <strong>at least one hit</strong>.
-                Using the Bernoulli model for independent at-bats:
-            </p>
+            <p class="text-muted">The final score is a Bernoulli probability — the chance of getting at least one hit given the expected AB count and effective BA.</p>
             <div class="formula-box mb-3">
-                P(Hit) = 1 &minus; (1 &minus; BA_eff)<sup>AB/G</sup>
-                <br>
-                <span class="text-muted" style="font-size:0.85rem;">
-                    AB/G = adjusted at-bats per game (lineup position shifts this ±0.4 ABs)
-                </span>
+                P(Hit) = 1 &minus; (1 &minus; BA_eff) ^ AB_per_game
             </div>
-            <p class="text-muted mb-0" style="font-size:0.9rem;">
-                <strong>Example:</strong> A player with BA_eff = .300 and 3.6 AB/game:
-                P(Hit) = 1 &minus; (0.700)<sup>3.6</sup> = <strong>~73%</strong>
+            <p class="text-muted small mb-3">
+                <strong>AB_per_game</strong> is adjusted by lineup position — leadoff hitters get ~0.4 more ABs per game than the 9-hole.
+                The lineup position is the player's average batting order slot from Statcast data over the last 7 days.
             </p>
-        </div>
-    </div>
+            <div class="formula-box">
+                AB_per_game_adjusted = AB_per_game + (5 &minus; avg_order) &times; 0.08
+            </div>
 
-    <!-- Lineup Position Bonus -->
-    <div class="card shadow-sm mb-4">
-        <div class="card-header bg-info text-dark">
-            <h5 class="mb-0">Lineup Position &rarr; AB/Game Adjustment</h5>
-        </div>
-        <div class="card-body p-0">
-            <table class="table table-bordered table-hover mb-0 text-center">
-                <thead class="table-light">
-                    <tr><th>Avg Lineup Slot</th><th>AB/Game Adjustment</th><th>Notes</th></tr>
-                </thead>
-                <tbody>
-                    {% for row in lineup_rows %}
-                    <tr {% if row.pos == 1 %}class="table-success"{% elif row.pos <= 3 %}class="table-warning"{% endif %}>
-                        <td><strong>#{{ row.pos }}</strong></td>
-                        <td>
-                            {% if row.bonus > 0 %}
-                                <span class="text-success fw-bold">+{{ row.bonus }}</span>
-                            {% elif row.bonus < 0 %}
-                                <span class="text-danger fw-bold">{{ row.bonus }}</span>
-                            {% else %}
-                                <span class="text-muted">0</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-start text-muted" style="font-size:0.9rem;">
-                            {% if row.pos == 1 %}Leadoff — most PAs, max AB adjustment
-                            {% elif row.pos == 2 %}2-hole — often the best all-around hitter
-                            {% elif row.pos == 3 %}3-hole — typically the best pure hitter
-                            {% elif row.pos == 4 %}Cleanup — power hitter, slightly fewer PAs
-                            {% elif row.pos == 5 %}5-hole
-                            {% elif row.pos == 6 %}6-hole
-                            {% elif row.pos == 7 %}7-hole
-                            {% elif row.pos == 8 %}8-hole
-                            {% elif row.pos == 9 %}9-hole — fewest PAs
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            <div class="p-3 text-muted" style="font-size:0.85rem;">
-                Formula: <code>AB/game += (5 &minus; avg_lineup_pos) &times; 0.08</code> &mdash;
-                leadoff adds ~+0.32, 9-hole subtracts ~0.32. Minimum floor of 2.5 AB/game.
+            <div class="mt-3">
+                <h6 class="section-header mb-2">Lineup Position Effect</h6>
+                <table class="table table-bordered table-hover mb-0 text-center">
+                    <thead class="table-light">
+                        <tr><th>Avg Lineup Slot</th><th>AB Adjustment</th><th>Notes</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in lineup_rows %}
+                        <tr {% if row.pos == 1 %}class="table-success"{% elif row.pos <= 3 %}class="table-warning"{% endif %}>
+                            <td><strong>#{{ row.pos }}</strong></td>
+                            <td>
+                                {% if row.pos < 5 %}<span class="text-success fw-bold">+{{ row.bonus }}</span>
+                                {% elif row.pos == 5 %}<span class="text-muted">0</span>
+                                {% else %}<span class="text-danger">&minus;{{ row.bonus|floatformat:1 }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-start text-muted" style="font-size:0.9rem;">
+                                {% if row.pos == 1 %}Leadoff — most PAs, maximum boost
+                                {% elif row.pos == 2 %}2-hole — typically the best all-around hitter
+                                {% elif row.pos == 3 %}3-hole — best pure hitter
+                                {% elif row.pos == 4 %}Cleanup — power hitter
+                                {% elif row.pos == 5 %}5-hole — baseline
+                                {% elif row.pos == 6 %}6-hole
+                                {% elif row.pos == 7 %}7-hole
+                                {% elif row.pos == 8 %}8-hole
+                                {% elif row.pos == 9 %}9-hole — fewest PAs
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -186,45 +181,89 @@
     <!-- Step 4: A-List vs B-List -->
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-dark text-white">
-            <h5 class="mb-0">Step 4 &mdash; Platoon-Aware A-List vs B-List Split</h5>
+            <h5 class="mb-0">Step 4 &mdash; A-List vs B-List Split</h5>
         </div>
         <div class="card-body">
             <p class="text-muted mb-3">
-                Batters hit better against <strong>opposite-handed pitchers</strong> (platoon advantage).
-                The split now uses actual pitcher throwing hand rather than batter handedness alone.
+                After scoring, the top candidates are split by platoon matchup. A player can score high and still land on the B-list.
             </p>
             <table class="table table-bordered mb-0">
                 <thead class="table-light">
-                    <tr><th>Batter</th><th>Pitcher Hand</th><th>Platoon</th><th>List</th></tr>
+                    <tr><th>List</th><th>Criteria</th><th>Meaning</th></tr>
                 </thead>
                 <tbody>
                     <tr class="table-success">
-                        <td>Left (LHB)</td><td>Right (RHP)</td>
-                        <td><span class="badge bg-success">Advantage</span></td>
                         <td><strong>A-List</strong></td>
-                    </tr>
-                    <tr class="table-success">
-                        <td>Right (RHB)</td><td>Any</td>
-                        <td><span class="badge bg-secondary">Neutral / Adv.</span></td>
-                        <td><strong>A-List</strong></td>
+                        <td>Cross-handed matchup (LHB vs RHP, or RHB vs LHP)</td>
+                        <td>Platoon <em>advantage</em> — recommended for Beat the Streak</td>
                     </tr>
                     <tr class="table-warning">
-                        <td>Left (LHB)</td><td>Left (LHP)</td>
-                        <td><span class="badge bg-warning text-dark">Disadvantage</span></td>
                         <td><strong>B-List</strong></td>
-                    </tr>
-                    <tr class="table-warning">
-                        <td>Left (LHB)</td><td>Unknown</td>
-                        <td><span class="badge bg-secondary">Unverified</span></td>
-                        <td><strong>B-List</strong> (conservative)</td>
+                        <td>Same-handed matchup, or pitcher hand unknown</td>
+                        <td>Platoon <em>disadvantage</em> or uncertainty — review before picking</td>
                     </tr>
                 </tbody>
             </table>
             <p class="text-muted mt-3 mb-0" style="font-size:0.875rem;">
-                B-list players are not disqualified — a left-handed batter facing a right-handed pitcher
-                should be moved to your personal A-list. Always check the <strong>[L]/[R]</strong>
-                pitcher indicator in the matchup column.
+                Pitcher hand is sourced from the MLB Stats API (announced starters) and Statcast. If a pitcher's hand is unknown, the player defaults to B-list as a precaution.
             </p>
+        </div>
+    </div>
+
+    <!-- Display-Only Batter Factors -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info text-dark">
+            <h5 class="mb-0">Display-Only Factors <span class="badge bg-light text-dark ms-2">Shown in badges, not in score</span></h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">These appear as badges and help you evaluate the matchup manually. They are <strong>not</strong> factored into P(Hit).</p>
+            <table class="table table-bordered mb-0">
+                <thead class="table-light">
+                    <tr><th>Badge</th><th>Source</th><th>What it means</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="badge bg-secondary">BB%</span></td>
+                        <td>BRef last 7 days</td>
+                        <td>Walk rate — patient hitters see more pitches and draw more walks, which indicates a good eye at the plate.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-secondary">Speed</span></td>
+                        <td>Statcast sprint speed</td>
+                        <td>Sprint speed in ft/s. Fast runners beat out more infield singles. Also factored into P(Hit) — see above.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-secondary">P.H</span></td>
+                        <td>BRef last ~4 starts</td>
+                        <td>Hits allowed by the opposing starter. Higher = easier matchup.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-secondary">P.ERA</span></td>
+                        <td>BRef last ~4 starts</td>
+                        <td>ERA of opposing starter. Higher = easier matchup.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-secondary">P.BB</span></td>
+                        <td>BRef last ~4 starts</td>
+                        <td>Walks issued by opposing starter. Higher = wilder, more hittable pitcher.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-secondary">P.IP</span></td>
+                        <td>BRef last ~4 starts</td>
+                        <td>Innings pitched by opposing starter.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-secondary">BP</span></td>
+                        <td>BRef last 15 days</td>
+                        <td>Hits allowed by the opponent's bullpen. Higher = weaker bullpen.</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge bg-light text-dark border">Park</span></td>
+                        <td>FanGraphs 3-year avg</td>
+                        <td>Park factor — 100 is league average, higher favors hitters (e.g. Coors Field = 115).</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -236,33 +275,24 @@
         <div class="card-body p-0">
             <table class="table table-bordered mb-0">
                 <thead class="table-light">
-                    <tr><th>Source</th><th>Used For</th><th>Access</th></tr>
+                    <tr><th>Source</th><th>Used For</th></tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td><strong>Baseball-Reference</strong></td>
-                        <td>H, AB, G, K%, PA — last 7 days and last 4 days (for decay weighting)</td>
-                        <td>pybaseball <code>batting_stats_range()</code></td>
+                        <td>BA, K%, PA, H, AB, Runs — 7-day and 4-day rolling windows</td>
                     </tr>
                     <tr>
                         <td><strong>FanGraphs</strong></td>
-                        <td>Full-season fallback stats, player handedness, current team (traded players)</td>
-                        <td>pybaseball <code>batting_stats()</code>, <code>pitching_stats()</code></td>
+                        <td>Full-season fallback stats, current team (traded players), pitcher ERA/WHIP</td>
                     </tr>
                     <tr>
-                        <td><strong>Baseball Savant (Statcast)</strong></td>
-                        <td>xBA (<code>estimated_ba_using_speedangle</code>), hard hit rate (exit velo &ge; 95 mph), avg lineup position, pitcher throwing hand, hit results</td>
-                        <td>pybaseball <code>statcast()</code></td>
-                    </tr>
-                    <tr>
-                        <td><strong>Baseball-Reference Schedule</strong></td>
-                        <td>Opponent and probable pitcher for each team on the game date</td>
-                        <td>pybaseball <code>schedule_and_record()</code></td>
+                        <td><strong>Statcast (Baseball Savant)</strong></td>
+                        <td>xBA, hard hit%, avg lineup position, batter/pitcher handedness, hit streaks</td>
                     </tr>
                     <tr>
                         <td><strong>MLB Stats API</strong></td>
-                        <td>Confirmed starting lineups (updated by cron every 10 min)</td>
-                        <td>REST API <code>statsapi.mlb.com</code></td>
+                        <td>Today's schedule, probable pitchers, pitcher throwing hand, confirmed lineups</td>
                     </tr>
                 </tbody>
             </table>

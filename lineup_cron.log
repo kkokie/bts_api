@@ -56794,3 +56794,4 @@ Traceback (most recent call last):
   File "/Users/kxkmi5556/PycharmProjects/beat_the_streak_2026/venv/lib/python3.10/site-packages/django/db/backends/postgresql/base.py", line 29, in <module>
     raise ImproperlyConfigured("Error loading psycopg2 or psycopg module")
 django.core.exceptions.ImproperlyConfigured: Error loading psycopg2 or psycopg module
+Schedule cache is from 2026-03-15, not today. Run fetch_schedule.
