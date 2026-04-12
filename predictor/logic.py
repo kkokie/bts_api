@@ -2,7 +2,7 @@ import re
 import unicodedata
 import requests
 import pandas as pd
-from pybaseball import batting_stats_range, batting_stats, schedule_and_record, pitching_stats, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
+from pybaseball import batting_stats_range, batting_stats, batting_stats_bref, schedule_and_record, pitching_stats, pitching_stats_bref, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
 from datetime import datetime, timedelta, date as date_class, timezone
 
 # --- CONFIGURATION ---
@@ -107,6 +107,34 @@ def get_pitcher_stats(season):
             return lookup
         except Exception as e:
             print(f"  [DEBUG] ⚠️ pitcher stats for {try_season} failed: {e}")
+            continue
+    # FanGraphs blocked — try Baseball Reference as final fallback
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Trying BRef pitcher stats for {try_season}...")
+        try:
+            df = pitching_stats_bref(try_season)
+            if df.empty:
+                continue
+            # BRef uses 'Tm' not 'Team'
+            lookup = {}
+            for _, row in df.iterrows():
+                name = row.get('Name', '')
+                if not isinstance(name, str) or not name:
+                    continue
+                last_name = name.split()[-1].lower()
+                team = row.get('Tm', '')
+                key = (last_name, team)
+                if key not in lookup or row.get('GS', 0) > lookup[key].get('GS', 0):
+                    lookup[key] = {
+                        'ERA': row.get('ERA'),
+                        'WHIP': row.get('WHIP'),
+                        'GS': row.get('GS', 0),
+                    }
+            if lookup:
+                print(f"  [DEBUG] BRef pitcher stats: {len(lookup)} pitchers (season {try_season}).")
+                return lookup
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ BRef pitcher stats for {try_season} failed: {e}")
             continue
     print(f"  [DEBUG] ❌ Could not fetch pitcher stats for {season} or {season - 1}.")
     return {}
@@ -573,6 +601,24 @@ def get_player_metadata(season):
             return df[cols_to_keep]
         except Exception as e:
             print(f"  [DEBUG] ⚠️ player metadata for {try_season} failed: {e}")
+            continue
+    # FanGraphs blocked — try Baseball Reference as final fallback (no Bats column)
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Trying BRef player metadata for {try_season}...")
+        try:
+            df = batting_stats_bref(try_season)
+            if df.empty:
+                continue
+            if 'Name' in df.columns:
+                df['Name'] = df['Name'].apply(clean_name_string)
+            # BRef already uses 'Tm'
+            cols_to_keep = [c for c in ['Name', 'Tm'] if c in df.columns]
+            if len(cols_to_keep) < 2:
+                continue
+            print(f"  [DEBUG] BRef player metadata loaded (season {try_season}, no Bats column).")
+            return df[cols_to_keep]
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ BRef player metadata for {try_season} failed: {e}")
             continue
     print(f"  [DEBUG] ❌ Could not fetch player metadata for {season} or {season - 1}.")
     return pd.DataFrame()

@@ -1,7 +1,7 @@
 # Deployment Guide
 
 Technical reference for containerizing and deploying the Beat the Streak app.
-For prediction logic and app internals, see [README.md](README.md).
+For prediction logic and app internals, see [LOGIC.md](LOGIC.md).
 
 ---
 
