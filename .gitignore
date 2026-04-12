@@ -26,4 +26,4 @@ db.sqlite3
 staticfiles/
 
 # Logs
-lineup_cron.log
+*.log
