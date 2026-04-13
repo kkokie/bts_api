@@ -123,13 +123,63 @@ jupyter notebook notebooks/train_model.ipynb
 
 ---
 
+## Model Results Log
+
+Each run logged here after training. Compare AUCs to track improvement over time.
+
+---
+
+### v2 — Apr 12 2026
+
+**Data:** 2,132 rows, 181 dates (2025 Apr 1 – Sep 28, re-backfilled with BRef fallback)
+**Train:** Apr 1 – Aug 30 | **Test:** Aug 30 – Sep 28
+**Hit rate:** 64.6%
+
+| Model | AUC |
+|---|---|
+| Hand-crafted score (baseline) | 0.4386 |
+| **Logistic Regression** | **0.5363** ✓ saved |
+| Random Forest | < LR |
+
+**Notes:** Re-backfill with BRef fallback fixed pitcher stats. LR beat RF this time and was saved.
+AUC improved from 0.5169 → 0.5363 (+0.019) just from cleaner data.
+
+---
+
+### v1 — Apr 12 2026
+
+**Data:** 2,093 rows, 178 dates (2025 Apr 1 – Sep 28)
+**Train:** Apr 1 – Aug 30 | **Test:** Aug 30 – Sep 28
+**Hit rate:** 64.5%
+
+| Model | AUC |
+|---|---|
+| Hand-crafted score (baseline) | 0.4492 |
+| Logistic Regression | 0.5122 |
+| **Random Forest** | **0.5169** ✓ saved |
+
+**Known issues with this run:**
+- FanGraphs was returning 403 during backfill → `pitcher_whip`, `p_whip`, `p_k9` were null/empty
+- BRef fallback added to `logic.py` after the fact
+- Re-backfill with `--force` + retrain will be v2
+
+**Features used:** `score`, `ba`, `xba`, `hh_pct`, `k_pct`, `bb_pct`, `speed`, `is_home`,
+`park_factor`, `avg_batting_order`, `hit_streak`, `pitcher_era`, `p_era`, `team_rank`,
+`bats_L`, `bats_S`, `pitch_R`, `pitch_L`, `platoon`, `is_a_list`
+
+**Features dropped (all null):** `p_whip`, `p_k9`
+
+---
+
 ## Roadmap
 
 ### Week 1–2 (current): Backfill + first model
 - [x] `backfill_training_data` management command
 - [x] `notebooks/train_model.ipynb` with logistic regression + random forest
-- [ ] Run backfill for full 2025 season
-- [ ] Train and evaluate first models
+- [x] Run backfill for full 2025 season
+- [x] Train and evaluate first models (v1)
+- [ ] Re-backfill with `--force` using BRef fallback fix (in progress)
+- [ ] Re-train models on clean data (v2)
 - [ ] Document which features have the most predictive signal
 
 ### Week 3–4: XGBoost + tuning

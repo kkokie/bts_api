@@ -23,8 +23,8 @@ A Django app that analyzes MLB player statistics and produces daily hit predicti
 | Backfill full 2025 season (Apr 1 – Sep 28) | Done — 2,093 rows, 1,350 hits / 743 outs |
 | Fix FanGraphs 403 → BRef fallback in `logic.py` | Done |
 | Train and evaluate first models (v1) | Done — see results below |
-| Re-backfill with BRef fix (`--force`) | **Next — pitcher stats were missing in v1** |
-| Re-train models on clean data (v2) | Pending |
+| Re-backfill with BRef fix (`--force`) | Done — 2,132 rows |
+| Re-train models on clean data (v2) | Done — LR 0.5363, RF < LR |
 | XGBoost / LightGBM tuning | Pending |
 | Wire model into `logic.py` | Pending |
 
