@@ -25,7 +25,8 @@ A Django app that analyzes MLB player statistics and produces daily hit predicti
 | Train and evaluate first models (v1) | Done — see results below |
 | Re-backfill with BRef fix (`--force`) | Done — 2,132 rows |
 | Re-train models on clean data (v2) | Done — LR 0.5363, RF < LR |
-| XGBoost / LightGBM tuning | Pending |
+| LightGBM (v3) | Done — AUC 0.5627, beats LR by +0.026 |
+| Hyperparameter tuning (TimeSeriesSplit) | Pending |
 | Wire model into `logic.py` | Pending |
 
 ### First model results (v1 — Apr 12 2026, incomplete pitcher data)
@@ -48,6 +49,19 @@ BRef fallback was added to `logic.py` — re-backfill with `--force` will fix th
 `team_rank`, `bats_L`, `bats_S`, `pitch_R`, `pitch_L`, `platoon`, `is_a_list`
 
 **Features dropped (all null):** `p_whip`, `p_k9`
+
+### Model results (v2 — Apr 12 2026, clean data with BRef fallback)
+
+Training data: 2,132 rows across 181 dates (2025 regular season, re-backfilled)
+Train: Apr 1 – Aug 29 | Test: Aug 29 – Sep 28
+
+| Model | AUC | Notes |
+|---|---|---|
+| Hand-crafted score (baseline) | 0.4386 | |
+| **Logistic Regression** | **0.5363** | +0.098 vs baseline — saved to `data/models/` |
+| Random Forest | 0.5347 | +0.096 vs baseline |
+
+**Improvement over v1:** AUC 0.5169 → 0.5363 (+0.019) from cleaner pitcher data alone.
 
 ---
 

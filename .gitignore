@@ -27,3 +27,9 @@ staticfiles/
 
 # Logs
 *.log
+
+# Trained ML models (binary artifacts — regenerate from data)
+data/models/
+
+# Jupyter autosave checkpoints
+.ipynb_checkpoints/

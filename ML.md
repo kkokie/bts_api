@@ -129,6 +129,23 @@ Each run logged here after training. Compare AUCs to track improvement over time
 
 ---
 
+### v3 — Apr 13 2026
+
+**Data:** 2,132 rows, 181 dates (same as v2)
+**Train:** Apr 1 – Aug 29 | **Test:** Aug 29 – Sep 28
+
+| Model | AUC |
+|---|---|
+| Hand-crafted score (baseline) | 0.4386 |
+| Logistic Regression | 0.5363 |
+| Random Forest | 0.5347 |
+| **LightGBM** | **0.5627** ✓ saved |
+
+**Notes:** Added LightGBM (XGBoost had arm64/libomp issues on Mac). LightGBM beat all previous models.
+Best improvement yet — AUC 0.5363 → 0.5627 (+0.026) over LR with same data.
+
+---
+
 ### v2 — Apr 12 2026
 
 **Data:** 2,132 rows, 181 dates (2025 Apr 1 – Sep 28, re-backfilled with BRef fallback)
