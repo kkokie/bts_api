@@ -14,6 +14,14 @@ A Django app that analyzes MLB player statistics and produces daily hit predicti
 
 ---
 
+## How Picks Are Ranked
+
+Every player gets two scores — **P(Hit)** (hand-crafted formula) and **ML score** (LightGBM trained on 2025 season outcomes). The final ranking uses ML score. P(Hit) is shown as dashboard badges for explainability but doesn't determine order.
+
+**When they disagree, trust ML.** A 0.01 P(Hit) difference is noise; the ML model's signal is stronger (AUC 0.5627 vs 0.4386 for hand-crafted). See [LOGIC.md → ML Ranking](LOGIC.md#ml-ranking-vs-phit) for full details.
+
+---
+
 ## ML Status
 
 | Step | Status |

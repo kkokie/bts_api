@@ -108,6 +108,27 @@ The B-list is not a disqualification — it's a flag to manually review the matc
 
 ---
 
+### ML Ranking vs P(Hit)
+
+Every player gets two scores:
+
+| Score | How it's computed | AUC (2025 test set) |
+|---|---|---|
+| **P(Hit)** | Hand-crafted formula weighting BA, xBA, K%, HH%, speed, etc. | 0.4386 — worse than random |
+| **ML score** | LightGBM trained on 2025 outcomes — learned which features actually predicted hits | 0.5627 — meaningfully better than random |
+
+**The final ranking order uses ML score** (not P(Hit)). P(Hit) drives the human-readable badges on the dashboard so you can understand *why* a player scored well, but the order you see them in — who's #1, who's #2 — is determined by the ML model.
+
+**Which to trust when they disagree:**
+- ML score wins. A 0.01 difference in P(Hit) is noise — the hand-crafted score compresses everyone into a narrow 67–99 range. If Player A has a higher P(Hit) but Player B has a higher ML score, pick Player B.
+- The only exception: a clear red flag the model can't see, like a very recent injury or a last-minute pitcher change not yet reflected in stats.
+
+**Why P(Hit) underperforms:** The formula was designed by intuition. The weights it assigns (e.g. how much to reward a 5% K% reduction) may not match what actually predicted hits in real games. LightGBM learned those weights from 2,132 labeled examples instead of guessing.
+
+**Model file:** `data/models/hit_predictor_lightgbm.joblib` — loaded once at server startup in `logic.py`. If the file is missing, predictions fall back to P(Hit) ranking with no ML score shown.
+
+---
+
 ### Batting Order Calculation
 
 Average batting order position is computed from Statcast data over the 7 days prior to the prediction date:
