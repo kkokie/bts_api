@@ -129,6 +129,22 @@ Each run logged here after training. Compare AUCs to track improvement over time
 
 ---
 
+### v4 — Apr 14 2026 (hyperparameter tuning)
+
+**Data:** 2,132 rows, 181 dates (same as v3)
+**Train:** Apr 1 – Aug 29 | **Test:** Aug 29 – Sep 28
+
+| Model | CV AUC | Test AUC | Notes |
+|---|---|---|---|
+| LightGBM default | — | 0.5627 | Retained as best |
+| LightGBM tuned (RandomizedSearch 60 iters, TimeSeriesSplit 5-fold) | 0.5127 | 0.4893 | Worse — overfit |
+
+**Best tuned params:** `n_estimators=395, num_leaves=77, learning_rate=0.117, subsample=0.951, colsample_bytree=0.609, min_child_samples=16, reg_alpha=0.348, reg_lambda=0.314`
+
+**Conclusion:** Dataset too small (1,705 train rows) for hyperparameter search to reliably improve generalization. Default LightGBM retained. Retrain when 2026 season data accumulates.
+
+---
+
 ### v3 — Apr 13 2026
 
 **Data:** 2,132 rows, 181 dates (same as v2)
@@ -190,25 +206,26 @@ AUC improved from 0.5169 → 0.5363 (+0.019) just from cleaner data.
 
 ## Roadmap
 
-### Week 1–2 (current): Backfill + first model
+### Week 1–2: Backfill + first model ✓
 - [x] `backfill_training_data` management command
 - [x] `notebooks/train_model.ipynb` with logistic regression + random forest
 - [x] Run backfill for full 2025 season
-- [x] Train and evaluate first models (v1)
-- [ ] Re-backfill with `--force` using BRef fallback fix (in progress)
-- [ ] Re-train models on clean data (v2)
-- [ ] Document which features have the most predictive signal
+- [x] Train and evaluate first models (v1, v2, v3)
+- [x] Re-backfill with BRef fallback fix
+- [x] LightGBM (AUC 0.5627, best result)
 
-### Week 3–4: XGBoost + tuning
-- Install `xgboost` or `lightgbm`
-- Add to notebook as Model 3
-- Hyperparameter tuning with `TimeSeriesSplit` cross-validation
-- Compare all three models, document the winner
+### Week 3–4: Tuning ✓ (no gain on small dataset)
+- [x] `notebooks/tune_lgbm.py` — RandomizedSearchCV × 60 iters with TimeSeriesSplit
+- [x] Wired LightGBM into `logic.py` — live ML scoring in production
+- Result: tuning hurt generalization (CV 0.5127 → test 0.4893). Default params retained.
+- Root cause: only 1,705 training rows / 181 dates — too small for hyperparameter search to help reliably.
+- **Fix:** accumulate 2026 season data, retrain in June/July.
 
-### Week 5+: Integration
-- Wire the saved model into `logic.py` — replace or blend with the hand-crafted score
-- Add a management command to retrain the model on a rolling basis
-- Track model accuracy over time in the DB
+### Week 5+: Accumulate data + retrain
+- [ ] Run `backfill_training_data` after each month of 2026 season
+- [ ] Retrain on 2025 + 2026 combined data — expect meaningful AUC gains
+- [ ] Add management command to retrain on a schedule
+- [ ] Track model accuracy per week in the DB (predicted vs actual hit rate)
 
 ### Feature engineering ideas
 - Rolling 7/14/30-day batting averages (currently only 7-day)
