@@ -1,9 +1,30 @@
+import os
 import re
+import math
+import warnings
 import unicodedata
 import requests
 import pandas as pd
 from pybaseball import batting_stats_range, batting_stats, batting_stats_bref, schedule_and_record, pitching_stats, pitching_stats_bref, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
 from datetime import datetime, timedelta, date as date_class, timezone
+
+# --- ML MODEL (lazy-loaded once at import time) ---
+_ML_MODEL = None
+_ML_FEATURE_COLS = None
+_ML_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'data', 'models', 'hit_predictor_lightgbm.joblib'
+)
+try:
+    import joblib as _joblib
+    _bundle = _joblib.load(_ML_MODEL_PATH)
+    _ML_MODEL = _bundle['model']
+    _ML_FEATURE_COLS = _bundle['feature_cols']
+    print(f"[ML] LightGBM loaded. AUC={_bundle.get('auc', '?')}, {len(_ML_FEATURE_COLS)} features.")
+except FileNotFoundError:
+    print(f"[ML] Model not found at {_ML_MODEL_PATH} — using hand-crafted score.")
+except Exception as _ml_load_err:
+    print(f"[ML] Failed to load model: {_ml_load_err} — using hand-crafted score.")
 
 # --- CONFIGURATION ---
 SEASON = 2026
@@ -916,6 +937,49 @@ def get_sprint_speed(season):
     return {}
 
 
+def _build_ml_row(player_info, list_type):
+    """Build a feature dict from a fully-assembled player_info dict for ML scoring."""
+    def _f(val):
+        try:
+            v = float(val)
+            return v if math.isfinite(v) else math.nan
+        except (TypeError, ValueError):
+            return math.nan
+
+    sb = player_info.get('Score_Breakdown', '') or ''
+
+    def _parse(pattern):
+        m = re.search(pattern, sb)
+        return float(m.group(1)) if m else math.nan
+
+    bats = player_info.get('Bats', '') or ''
+    ph   = player_info.get('Pitcher_Hand', '') or ''
+
+    return {
+        'score':             _f(player_info.get('Score')),
+        'ba':                _parse(r'BA:\s*([0-9.]+)'),
+        'xba':               _parse(r'xBA:\s*([0-9.]+)'),
+        'hh_pct':            _parse(r'HH%:\s*([0-9.]+)'),
+        'k_pct':             _parse(r'K%:\s*([0-9.]+)'),
+        'bb_pct':            _parse(r'BB%:\s*([0-9.]+)'),
+        'speed':             _parse(r'Speed:\s*([0-9.]+)'),
+        'is_home':           1 if player_info.get('Is_Home') else 0,
+        'park_factor':       _f(player_info.get('Park_Factor')),
+        'avg_batting_order': _f(player_info.get('Avg_Order')),
+        'hit_streak':        _f(player_info.get('Hit_Streak')),
+        'pitcher_era':       _f(player_info.get('Pitcher_ERA')),
+        'pitcher_whip':      _f(player_info.get('Pitcher_WHIP')),
+        'p_era':             _parse(r'P\.ERA:\s*([0-9.]+)'),
+        'team_rank':         _f(player_info.get('Team_Rank')),
+        'bats_L':            1 if bats == 'L' else 0,
+        'bats_S':            1 if bats == 'S' else 0,
+        'pitch_R':           1 if ph == 'R' else 0,
+        'pitch_L':           1 if ph == 'L' else 0,
+        'platoon':           1 if ((bats == 'L' and ph == 'R') or (bats == 'R' and ph == 'L')) else 0,
+        'is_a_list':         1 if list_type == 'A' else 0,
+    }
+
+
 def get_predictions(simulation_date):
     print(f"\n--- 🕵️‍♂️ STARTING DEBUG ANALYSIS FOR: {simulation_date.strftime('%Y-%m-%d')} ---")
 
@@ -1300,10 +1364,40 @@ def get_predictions(simulation_date):
             'XBA': xba_lookup.get(name) or xba_lookup.get(_ascii_name),
         }
 
+        _list_type = 'B' if reason_for_demotion else 'A'
+
+        # --- ML SCORING ---
+        if _ML_MODEL is not None and _ML_FEATURE_COLS is not None:
+            try:
+                _ml_row = _build_ml_row(player_info, _list_type)
+                _ml_df = pd.DataFrame([_ml_row], columns=_ML_FEATURE_COLS)
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore')
+                    _ml_prob = float(_ML_MODEL.predict_proba(_ml_df)[0, 1])
+                player_info['ML_Score'] = round(_ml_prob, 4)
+                player_info['Score_Breakdown'] = (
+                    player_info['Score_Breakdown'] + f" | ML: {_ml_prob:.2f}"
+                )
+            except Exception as _ml_err:
+                print(f"  [ML] Scoring failed for {name}: {_ml_err}")
+                player_info['ML_Score'] = None
+        else:
+            player_info['ML_Score'] = None
+        # --- END ML SCORING ---
+
         if reason_for_demotion:
             final_b_list.append(player_info)
         else:
             final_a_list.append(player_info)
 
-    print(f"  [DEBUG] Done. A-List: {len(final_a_list)}, B-List: {len(final_b_list)}")
+    # Sort by ML probability if available, else hand-crafted score
+    def _sort_key(p):
+        ml = p.get('ML_Score')
+        return ml if ml is not None else (p.get('Score', 0.0) / 100.0)
+
+    final_a_list.sort(key=_sort_key, reverse=True)
+    final_b_list.sort(key=_sort_key, reverse=True)
+
+    ranked_by = 'ML' if _ML_MODEL is not None else 'score'
+    print(f"  [DEBUG] Done. A-List: {len(final_a_list)}, B-List: {len(final_b_list)} [{ranked_by}-ranked]")
     return final_a_list, final_b_list
