@@ -129,6 +129,35 @@ Each run logged here after training. Compare AUCs to track improvement over time
 
 ---
 
+### v6 — Apr 26 2026 (full model comparison)
+
+**Data:** 2,281 rows, 193 dates (2025 full season + Apr 2026)
+**Train:** 1,824 rows | **Test:** 457 rows
+
+| Model | AUC | Delta vs baseline | Notes |
+|---|---|---|---|
+| Hand-crafted score (baseline) | 0.4692 | — | |
+| XGBoost tuned | 0.4925 | +0.023 | Overfit badly — bottom of the pack |
+| Stacking (LR+LGBM+CatBoost → LR meta) | 0.5105 | +0.041 | Meta-learner found no useful signal |
+| LightGBM default | 0.5228 | +0.054 | |
+| Logistic Regression | 0.5260 | +0.057 | |
+| CatBoost (tuned, 30 configs) | 0.5313 | +0.062 | |
+| Random Forest | 0.5323 | +0.063 | |
+| Blend equal (LGBM+CB+LR) | 0.5497 | +0.081 | |
+| Blend weighted (0.5 LGBM + 0.3 CB + 0.2 LR) | 0.5514 | +0.082 | |
+| **LightGBM tuned** | **0.5515** | **+0.082** | ✓ saved — best deployable |
+
+**Key findings:**
+- Tuned LightGBM is the best single deployable model
+- Weighted blend is virtually tied (0.5514) — not worth the added complexity
+- XGBoost overfits badly on this dataset — avoid
+- Stacking hurt — LR/LGBM/CatBoost outputs are too correlated for a meta-learner to exploit
+- We've hit the ceiling for ML technique improvements on current features
+
+**Next lever: better features** — `p_whip` and `p_k9` are 100% null in training data. Adding real pitcher peripherals should unlock meaningful AUC gains.
+
+---
+
 ### v5 — Apr 26 2026 (2026 data added + retrain)
 
 **Data:** 2,281 rows, 193 dates (2025 full season + Apr 2026)
