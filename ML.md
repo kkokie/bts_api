@@ -129,6 +129,23 @@ Each run logged here after training. Compare AUCs to track improvement over time
 
 ---
 
+### v5 — Apr 26 2026 (2026 data added + retrain)
+
+**Data:** 2,281 rows, 193 dates (2025 full season + Apr 2026)
+**Train:** ~1,824 rows | **Test:** ~457 rows
+
+| Model | AUC | Notes |
+|---|---|---|
+| Hand-crafted score (baseline) | 0.4692 | |
+| LightGBM default | 0.5228 | |
+| **LightGBM tuned** | **0.5515** ✓ saved | +0.029 over default — tuning helps with more data |
+
+**Best params:** `n_estimators=334, num_leaves=22, max_depth=5, learning_rate=0.079, subsample=0.637, colsample_bytree=0.607, min_child_samples=17, reg_alpha=0.329, reg_lambda=0.284`
+
+**Key finding:** Hyperparameter tuning now helps (+0.029) vs last run where it hurt (-0.073). More data (2,281 vs 2,132 rows) gave the search enough signal to generalize.
+
+---
+
 ### v4 — Apr 14 2026 (hyperparameter tuning)
 
 **Data:** 2,132 rows, 181 dates (same as v3)
@@ -222,10 +239,12 @@ AUC improved from 0.5169 → 0.5363 (+0.019) just from cleaner data.
 - **Fix:** accumulate 2026 season data, retrain in June/July.
 
 ### Week 5+: Accumulate data + retrain
-- [ ] Run `backfill_training_data` after each month of 2026 season
-- [ ] Retrain on 2025 + 2026 combined data — expect meaningful AUC gains
-- [ ] Add management command to retrain on a schedule
-- [ ] Track model accuracy per week in the DB (predicted vs actual hit rate)
+- [x] Run `backfill_training_data` for Apr 2026 — 2,281 rows total
+- [x] Retrain on 2025 + 2026 combined — tuned AUC 0.5515, tuning now helps
+- [ ] Repeat monthly as season progresses (May, June, ...)
+- [ ] Add `p_whip` / `p_k9` features via MLB Stats API (currently 100% null)
+- [ ] Batter vs pitcher handedness career splits (richer than binary platoon flag)
+- [ ] Rolling 14/30-day BA alongside 7-day
 
 ### Feature engineering ideas
 - Rolling 7/14/30-day batting averages (currently only 7-day)
