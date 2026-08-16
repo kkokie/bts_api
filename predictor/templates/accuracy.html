@@ -15,7 +15,7 @@
     </div>
 
     <!-- Stats cards -->
-    <div class="row mb-4 g-3">
+    <div class="row mb-3 g-3">
         {% for label, s in stats %}
         <div class="col-sm-4">
             <div class="card text-center shadow-sm h-100">
@@ -39,11 +39,52 @@
         {% endfor %}
     </div>
 
+    <!-- Season filter -->
+    {% if available_years %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <form method="get" class="d-flex align-items-center gap-2 mb-0">
+            <label for="yearSelect" class="fw-semibold text-nowrap mb-0">Season:</label>
+            <select id="yearSelect" name="year" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()">
+                <option value="">All seasons</option>
+                {% for y in available_years %}
+                <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+            </select>
+            {% if selected_year %}
+            <a href="?" class="btn btn-sm btn-outline-secondary">Clear</a>
+            {% endif %}
+        </form>
+
+        {% if season_stats %}
+        <div class="card text-center shadow-sm flex-shrink-0" style="min-width:180px;">
+            <div class="card-body py-2 px-3">
+                {% if season_stats.pct is not None %}
+                    <div class="fs-3 fw-bold {% if season_stats.pct >= 70 %}text-success{% elif season_stats.pct >= 60 %}text-warning{% else %}text-danger{% endif %}">
+                        {{ season_stats.pct }}%
+                    </div>
+                {% else %}
+                    <div class="fs-3 fw-bold text-muted">—</div>
+                {% endif %}
+                <div class="text-muted fw-semibold small">{{ selected_year }} Season</div>
+                {% if season_stats.total %}
+                <small class="text-muted">{{ season_stats.hits }} / {{ season_stats.total }} picks</small>
+                {% else %}
+                <small class="text-muted">No data</small>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <!-- Per-day table -->
     <div class="card shadow-sm">
         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Top Pick Per Day</h5>
-            <small class="opacity-75">{{ stats_all.total }} days tracked</small>
+            <h5 class="mb-0">
+                Top Pick Per Day
+                {% if selected_year %}<span class="badge bg-light text-primary ms-2">{{ selected_year }}</span>{% endif %}
+            </h5>
+            <small class="opacity-75">{{ rows|length }} day{% if rows|length != 1 %}s{% endif %} shown</small>
         </div>
         <div class="card-body p-0">
             <table class="table table-hover mb-0">

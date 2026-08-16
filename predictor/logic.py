@@ -543,9 +543,84 @@ def clean_name_string(name):
     return name
 
 
+def _window_stats_from_statcast(start_str, end_str):
+    """
+    Build per-player batting stats for a date range directly from Statcast.
+    Used as fallback when Baseball-Reference is rate-limited (HTTP 429) and
+    FanGraphs is unavailable. Returns a DataFrame matching get_window_stats output.
+    """
+    try:
+        print(f"  [DEBUG] 🔄 Statcast window fallback ({start_str} to {end_str})...")
+        df = statcast(start_str, end_str)
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        if 'game_type' in df.columns:
+            df = df[df['game_type'] == 'R']
+        if df.empty:
+            return pd.DataFrame()
+
+        hit_events = {'single', 'double', 'triple', 'home_run'}
+        non_ab_events = {
+            'walk', 'intent_walk', 'hit_by_pitch', 'sac_fly', 'sac_fly_double_play',
+            'catcher_interf', 'fan_interference', 'sac_bunt', 'sac_bunt_double_play',
+        }
+
+        pa_df = df[df['events'].notna()].copy()
+        if pa_df.empty:
+            return pd.DataFrame()
+
+        pa_df['_is_hit'] = pa_df['events'].isin(hit_events)
+        pa_df['_is_ab']  = ~pa_df['events'].isin(non_ab_events)
+        pa_df['_is_so']  = pa_df['events'] == 'strikeout'
+        pa_df['_is_bb']  = pa_df['events'].isin({'walk', 'intent_walk'})
+        pa_df['_date']   = pd.to_datetime(pa_df['game_date'])
+        pa_df['_team']   = pa_df['home_team']
+        mask_top = pa_df['inning_topbot'] == 'Top'
+        pa_df.loc[mask_top, '_team'] = pa_df.loc[mask_top, 'away_team']
+
+        agg = pa_df.groupby('batter').agg(
+            H=('_is_hit', 'sum'),
+            PA=('_is_hit', 'count'),
+            AB=('_is_ab', 'sum'),
+            SO=('_is_so', 'sum'),
+            BB=('_is_bb', 'sum'),
+            G=('_date', 'nunique'),
+            Tm=('_team', lambda x: x.mode().iloc[0] if len(x) > 0 else ''),
+        ).reset_index()
+
+        batter_ids = agg['batter'].dropna().astype(int).unique().tolist()
+        if not batter_ids:
+            return pd.DataFrame()
+
+        id_df = playerid_reverse_lookup(batter_ids, key_type='mlbam')
+        name_map = {}
+        for _, row in id_df.iterrows():
+            mid = int(row['key_mlbam'])
+            first = str(row['name_first']).strip().title()
+            last  = str(row['name_last']).strip().title()
+            name_map[mid] = clean_name_string(f"{first} {last}")
+
+        agg['Name'] = agg['batter'].apply(lambda x: name_map.get(int(x), ''))
+        agg = agg[agg['Name'] != ''].copy()
+        if agg.empty:
+            return pd.DataFrame()
+
+        agg['BA']  = (agg['H'] / agg['AB'].replace(0, float('nan'))).fillna(0.0)
+        agg['K%']  = (agg['SO'] / agg['PA'].replace(0, float('nan')) * 100).fillna(20.0)
+
+        print(f"  [DEBUG] ✅ Statcast window fallback: {len(agg)} players.")
+        return agg[['Name', 'H', 'AB', 'PA', 'G', 'SO', 'BB', 'BA', 'K%', 'Tm']].copy()
+
+    except Exception as e:
+        print(f"  [DEBUG] ⚠️ Statcast window fallback failed: {e}")
+        return pd.DataFrame()
+
+
 def get_window_stats(days_back, reference_date):
     """
-    Robust fetcher: Tries specific range, falls back to Season stats.
+    Robust fetcher: Tries specific range, falls back to Season stats,
+    then Statcast-derived stats if BRef is rate-limited.
     Standardizes column names (Team -> Tm) so logic never crashes.
     """
     end_date = reference_date - timedelta(days=1)
@@ -577,7 +652,12 @@ def get_window_stats(days_back, reference_date):
                 print(f"  [DEBUG] ⚠️ Season {try_season} fallback failed: {e2}")
         if df.empty:
             print(f"  [DEBUG] ❌ CRASH: All season fallbacks failed.")
-            return pd.DataFrame()
+            # ATTEMPT 4: Statcast fallback (BRef rate-limited, FanGraphs unavailable)
+            df = _window_stats_from_statcast(start_str, end_str)
+            if df.empty:
+                print(f"  [DEBUG] ❌ Statcast fallback also failed.")
+                return pd.DataFrame()
+            return df  # Already standardized
 
     # --- STANDARDIZATION ---
     if 'Team' in df.columns and 'Tm' not in df.columns:

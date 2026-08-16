@@ -31,6 +31,17 @@ def accuracy(request):
         .order_by('-date')
     )
 
+    available_years = sorted({d.year for d in dates}, reverse=True)
+
+    selected_year = request.GET.get('year')
+    if selected_year:
+        try:
+            selected_year = int(selected_year)
+            if selected_year not in available_years:
+                selected_year = None
+        except (ValueError, TypeError):
+            selected_year = None
+
     # Top pick per day — prefer ml_score ranking when available
     rows = []
     for d in dates:
@@ -49,8 +60,10 @@ def accuracy(request):
                 'got_hit': top.got_hit,
             })
 
-    def window_stats(days=None):
-        if days:
+    def window_stats(days=None, year=None):
+        if year:
+            subset = [r for r in rows if r['date'].year == year]
+        elif days:
             cutoff = today - timedelta(days=days)
             subset = [r for r in rows if r['date'] >= cutoff]
         else:
@@ -64,14 +77,19 @@ def accuracy(request):
         }
 
     stats_all = window_stats()
+    display_rows = [r for r in rows if r['date'].year == selected_year] if selected_year else rows
+
     context = {
-        'rows': rows,
+        'rows': display_rows,
         'stats': [
             ('Last 7 Days',  window_stats(7)),
             ('Last 30 Days', window_stats(30)),
             ('All Time',     stats_all),
         ],
         'stats_all': stats_all,
+        'available_years': available_years,
+        'selected_year': selected_year,
+        'season_stats': window_stats(year=selected_year) if selected_year else None,
     }
     return render(request, 'accuracy.html', context)
 
