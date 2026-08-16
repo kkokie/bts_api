@@ -1,9 +1,30 @@
+import os
 import re
+import math
+import warnings
 import unicodedata
 import requests
 import pandas as pd
-from pybaseball import batting_stats_range, batting_stats, schedule_and_record, pitching_stats, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
+from pybaseball import batting_stats_range, batting_stats, batting_stats_bref, schedule_and_record, pitching_stats, pitching_stats_bref, pitching_stats_range, statcast, statcast_sprint_speed, playerid_reverse_lookup
 from datetime import datetime, timedelta, date as date_class, timezone
+
+# --- ML MODEL (lazy-loaded once at import time) ---
+_ML_MODEL = None
+_ML_FEATURE_COLS = None
+_ML_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'data', 'models', 'hit_predictor_lightgbm.joblib'
+)
+try:
+    import joblib as _joblib
+    _bundle = _joblib.load(_ML_MODEL_PATH)
+    _ML_MODEL = _bundle['model']
+    _ML_FEATURE_COLS = _bundle['feature_cols']
+    print(f"[ML] LightGBM loaded. AUC={_bundle.get('auc', '?')}, {len(_ML_FEATURE_COLS)} features.")
+except FileNotFoundError:
+    print(f"[ML] Model not found at {_ML_MODEL_PATH} — using hand-crafted score.")
+except Exception as _ml_load_err:
+    print(f"[ML] Failed to load model: {_ml_load_err} — using hand-crafted score.")
 
 # --- CONFIGURATION ---
 SEASON = 2026
@@ -107,6 +128,34 @@ def get_pitcher_stats(season):
             return lookup
         except Exception as e:
             print(f"  [DEBUG] ⚠️ pitcher stats for {try_season} failed: {e}")
+            continue
+    # FanGraphs blocked — try Baseball Reference as final fallback
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Trying BRef pitcher stats for {try_season}...")
+        try:
+            df = pitching_stats_bref(try_season)
+            if df.empty:
+                continue
+            # BRef uses 'Tm' not 'Team'
+            lookup = {}
+            for _, row in df.iterrows():
+                name = row.get('Name', '')
+                if not isinstance(name, str) or not name:
+                    continue
+                last_name = name.split()[-1].lower()
+                team = row.get('Tm', '')
+                key = (last_name, team)
+                if key not in lookup or row.get('GS', 0) > lookup[key].get('GS', 0):
+                    lookup[key] = {
+                        'ERA': row.get('ERA'),
+                        'WHIP': row.get('WHIP'),
+                        'GS': row.get('GS', 0),
+                    }
+            if lookup:
+                print(f"  [DEBUG] BRef pitcher stats: {len(lookup)} pitchers (season {try_season}).")
+                return lookup
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ BRef pitcher stats for {try_season} failed: {e}")
             continue
     print(f"  [DEBUG] ❌ Could not fetch pitcher stats for {season} or {season - 1}.")
     return {}
@@ -494,9 +543,84 @@ def clean_name_string(name):
     return name
 
 
+def _window_stats_from_statcast(start_str, end_str):
+    """
+    Build per-player batting stats for a date range directly from Statcast.
+    Used as fallback when Baseball-Reference is rate-limited (HTTP 429) and
+    FanGraphs is unavailable. Returns a DataFrame matching get_window_stats output.
+    """
+    try:
+        print(f"  [DEBUG] 🔄 Statcast window fallback ({start_str} to {end_str})...")
+        df = statcast(start_str, end_str)
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        if 'game_type' in df.columns:
+            df = df[df['game_type'] == 'R']
+        if df.empty:
+            return pd.DataFrame()
+
+        hit_events = {'single', 'double', 'triple', 'home_run'}
+        non_ab_events = {
+            'walk', 'intent_walk', 'hit_by_pitch', 'sac_fly', 'sac_fly_double_play',
+            'catcher_interf', 'fan_interference', 'sac_bunt', 'sac_bunt_double_play',
+        }
+
+        pa_df = df[df['events'].notna()].copy()
+        if pa_df.empty:
+            return pd.DataFrame()
+
+        pa_df['_is_hit'] = pa_df['events'].isin(hit_events)
+        pa_df['_is_ab']  = ~pa_df['events'].isin(non_ab_events)
+        pa_df['_is_so']  = pa_df['events'] == 'strikeout'
+        pa_df['_is_bb']  = pa_df['events'].isin({'walk', 'intent_walk'})
+        pa_df['_date']   = pd.to_datetime(pa_df['game_date'])
+        pa_df['_team']   = pa_df['home_team']
+        mask_top = pa_df['inning_topbot'] == 'Top'
+        pa_df.loc[mask_top, '_team'] = pa_df.loc[mask_top, 'away_team']
+
+        agg = pa_df.groupby('batter').agg(
+            H=('_is_hit', 'sum'),
+            PA=('_is_hit', 'count'),
+            AB=('_is_ab', 'sum'),
+            SO=('_is_so', 'sum'),
+            BB=('_is_bb', 'sum'),
+            G=('_date', 'nunique'),
+            Tm=('_team', lambda x: x.mode().iloc[0] if len(x) > 0 else ''),
+        ).reset_index()
+
+        batter_ids = agg['batter'].dropna().astype(int).unique().tolist()
+        if not batter_ids:
+            return pd.DataFrame()
+
+        id_df = playerid_reverse_lookup(batter_ids, key_type='mlbam')
+        name_map = {}
+        for _, row in id_df.iterrows():
+            mid = int(row['key_mlbam'])
+            first = str(row['name_first']).strip().title()
+            last  = str(row['name_last']).strip().title()
+            name_map[mid] = clean_name_string(f"{first} {last}")
+
+        agg['Name'] = agg['batter'].apply(lambda x: name_map.get(int(x), ''))
+        agg = agg[agg['Name'] != ''].copy()
+        if agg.empty:
+            return pd.DataFrame()
+
+        agg['BA']  = (agg['H'] / agg['AB'].replace(0, float('nan'))).fillna(0.0)
+        agg['K%']  = (agg['SO'] / agg['PA'].replace(0, float('nan')) * 100).fillna(20.0)
+
+        print(f"  [DEBUG] ✅ Statcast window fallback: {len(agg)} players.")
+        return agg[['Name', 'H', 'AB', 'PA', 'G', 'SO', 'BB', 'BA', 'K%', 'Tm']].copy()
+
+    except Exception as e:
+        print(f"  [DEBUG] ⚠️ Statcast window fallback failed: {e}")
+        return pd.DataFrame()
+
+
 def get_window_stats(days_back, reference_date):
     """
-    Robust fetcher: Tries specific range, falls back to Season stats.
+    Robust fetcher: Tries specific range, falls back to Season stats,
+    then Statcast-derived stats if BRef is rate-limited.
     Standardizes column names (Team -> Tm) so logic never crashes.
     """
     end_date = reference_date - timedelta(days=1)
@@ -528,7 +652,12 @@ def get_window_stats(days_back, reference_date):
                 print(f"  [DEBUG] ⚠️ Season {try_season} fallback failed: {e2}")
         if df.empty:
             print(f"  [DEBUG] ❌ CRASH: All season fallbacks failed.")
-            return pd.DataFrame()
+            # ATTEMPT 4: Statcast fallback (BRef rate-limited, FanGraphs unavailable)
+            df = _window_stats_from_statcast(start_str, end_str)
+            if df.empty:
+                print(f"  [DEBUG] ❌ Statcast fallback also failed.")
+                return pd.DataFrame()
+            return df  # Already standardized
 
     # --- STANDARDIZATION ---
     if 'Team' in df.columns and 'Tm' not in df.columns:
@@ -573,6 +702,24 @@ def get_player_metadata(season):
             return df[cols_to_keep]
         except Exception as e:
             print(f"  [DEBUG] ⚠️ player metadata for {try_season} failed: {e}")
+            continue
+    # FanGraphs blocked — try Baseball Reference as final fallback (no Bats column)
+    for try_season in [season, season - 1]:
+        print(f"  [DEBUG] Trying BRef player metadata for {try_season}...")
+        try:
+            df = batting_stats_bref(try_season)
+            if df.empty:
+                continue
+            if 'Name' in df.columns:
+                df['Name'] = df['Name'].apply(clean_name_string)
+            # BRef already uses 'Tm'
+            cols_to_keep = [c for c in ['Name', 'Tm'] if c in df.columns]
+            if len(cols_to_keep) < 2:
+                continue
+            print(f"  [DEBUG] BRef player metadata loaded (season {try_season}, no Bats column).")
+            return df[cols_to_keep]
+        except Exception as e:
+            print(f"  [DEBUG] ⚠️ BRef player metadata for {try_season} failed: {e}")
             continue
     print(f"  [DEBUG] ❌ Could not fetch player metadata for {season} or {season - 1}.")
     return pd.DataFrame()
@@ -868,6 +1015,49 @@ def get_sprint_speed(season):
         except Exception as e:
             print(f"  [DEBUG] ⚠️ Sprint speed {try_season} failed: {e}")
     return {}
+
+
+def _build_ml_row(player_info, list_type):
+    """Build a feature dict from a fully-assembled player_info dict for ML scoring."""
+    def _f(val):
+        try:
+            v = float(val)
+            return v if math.isfinite(v) else math.nan
+        except (TypeError, ValueError):
+            return math.nan
+
+    sb = player_info.get('Score_Breakdown', '') or ''
+
+    def _parse(pattern):
+        m = re.search(pattern, sb)
+        return float(m.group(1)) if m else math.nan
+
+    bats = player_info.get('Bats', '') or ''
+    ph   = player_info.get('Pitcher_Hand', '') or ''
+
+    return {
+        'score':             _f(player_info.get('Score')),
+        'ba':                _parse(r'BA:\s*([0-9.]+)'),
+        'xba':               _parse(r'xBA:\s*([0-9.]+)'),
+        'hh_pct':            _parse(r'HH%:\s*([0-9.]+)'),
+        'k_pct':             _parse(r'K%:\s*([0-9.]+)'),
+        'bb_pct':            _parse(r'BB%:\s*([0-9.]+)'),
+        'speed':             _parse(r'Speed:\s*([0-9.]+)'),
+        'is_home':           1 if player_info.get('Is_Home') else 0,
+        'park_factor':       _f(player_info.get('Park_Factor')),
+        'avg_batting_order': _f(player_info.get('Avg_Order')),
+        'hit_streak':        _f(player_info.get('Hit_Streak')),
+        'pitcher_era':       _f(player_info.get('Pitcher_ERA')),
+        'pitcher_whip':      _f(player_info.get('Pitcher_WHIP')),
+        'p_era':             _parse(r'P\.ERA:\s*([0-9.]+)'),
+        'team_rank':         _f(player_info.get('Team_Rank')),
+        'bats_L':            1 if bats == 'L' else 0,
+        'bats_S':            1 if bats == 'S' else 0,
+        'pitch_R':           1 if ph == 'R' else 0,
+        'pitch_L':           1 if ph == 'L' else 0,
+        'platoon':           1 if ((bats == 'L' and ph == 'R') or (bats == 'R' and ph == 'L')) else 0,
+        'is_a_list':         1 if list_type == 'A' else 0,
+    }
 
 
 def get_predictions(simulation_date):
@@ -1254,10 +1444,40 @@ def get_predictions(simulation_date):
             'XBA': xba_lookup.get(name) or xba_lookup.get(_ascii_name),
         }
 
+        _list_type = 'B' if reason_for_demotion else 'A'
+
+        # --- ML SCORING ---
+        if _ML_MODEL is not None and _ML_FEATURE_COLS is not None:
+            try:
+                _ml_row = _build_ml_row(player_info, _list_type)
+                _ml_df = pd.DataFrame([_ml_row], columns=_ML_FEATURE_COLS)
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore')
+                    _ml_prob = float(_ML_MODEL.predict_proba(_ml_df)[0, 1])
+                player_info['ML_Score'] = round(_ml_prob, 4)
+                player_info['Score_Breakdown'] = (
+                    player_info['Score_Breakdown'] + f" | ML: {_ml_prob:.2f}"
+                )
+            except Exception as _ml_err:
+                print(f"  [ML] Scoring failed for {name}: {_ml_err}")
+                player_info['ML_Score'] = None
+        else:
+            player_info['ML_Score'] = None
+        # --- END ML SCORING ---
+
         if reason_for_demotion:
             final_b_list.append(player_info)
         else:
             final_a_list.append(player_info)
 
-    print(f"  [DEBUG] Done. A-List: {len(final_a_list)}, B-List: {len(final_b_list)}")
+    # Sort by ML probability if available, else hand-crafted score
+    def _sort_key(p):
+        ml = p.get('ML_Score')
+        return ml if ml is not None else (p.get('Score', 0.0) / 100.0)
+
+    final_a_list.sort(key=_sort_key, reverse=True)
+    final_b_list.sort(key=_sort_key, reverse=True)
+
+    ranked_by = 'ML' if _ML_MODEL is not None else 'score'
+    print(f"  [DEBUG] Done. A-List: {len(final_a_list)}, B-List: {len(final_b_list)} [{ranked_by}-ranked]")
     return final_a_list, final_b_list

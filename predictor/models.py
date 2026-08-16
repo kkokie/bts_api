@@ -30,6 +30,7 @@ class Prediction(models.Model):
     hit_streak = models.IntegerField(default=0)
     lineup_confirmed = models.BooleanField(null=True, blank=True, default=None)
     xba = models.FloatField(null=True, blank=True)
+    ml_score = models.FloatField(null=True, blank=True)
 
     class Meta:
         unique_together = ('date', 'name')
@@ -65,6 +66,7 @@ class Prediction(models.Model):
                 team_rank=p.get('Team_Rank'),
                 hit_streak=p.get('Hit_Streak', 0),
                 xba=p.get('XBA'),
+                ml_score=p.get('ML_Score'),
             )
             for p in a_list
         ] + [
@@ -85,6 +87,7 @@ class Prediction(models.Model):
                 team_rank=p.get('Team_Rank'),
                 hit_streak=p.get('Hit_Streak', 0),
                 xba=p.get('XBA'),
+                ml_score=p.get('ML_Score'),
             )
             for p in b_list
         ]

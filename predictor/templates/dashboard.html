@@ -31,7 +31,8 @@
         <div class="col text-center">
             <h1 class="display-5 fw-bold">⚾ Beat the Streak AI</h1>
             <p class="lead text-muted">Predicting hits for {{ pretty_date }}</p>
-            <a href="/scoring/" class="btn btn-sm btn-outline-secondary">How scores are calculated &rarr;</a>
+            <a href="/scoring/" class="btn btn-sm btn-outline-secondary me-2">How scores are calculated &rarr;</a>
+            <a href="/accuracy/" class="btn btn-sm btn-outline-primary">Model accuracy &rarr;</a>
         </div>
     </div>
 
@@ -220,6 +221,7 @@
         'P.BB':   'Walks issued by opposing starter (last ~4 starts). Higher = wilder pitcher.',
         'P.IP':   'Innings pitched by opposing starter (last ~4 starts).',
         'BP':     'Hits allowed by opponent\'s bullpen (last 15 days). Higher = weaker bullpen.',
+        'ML:':    'LightGBM predicted hit probability (0–1). Higher = model thinks hit is more likely.',
     };
 
     function getTooltip(factor) {
@@ -268,6 +270,17 @@
                 if (z >= 0)  return 'bg-warning text-dark';
                 if (z >= -1) return 'bg-orange';
                 return 'bg-danger';
+            }
+        }
+
+        if (factor.startsWith('ML:')) {
+            var m = factor.match(/ML:\s*([\d.]+)/);
+            if (m) {
+                var prob = parseFloat(m[1]);
+                if (prob >= 0.72) return 'bg-primary';
+                if (prob >= 0.68) return 'bg-success';
+                if (prob >= 0.64) return 'bg-warning text-dark';
+                return 'bg-secondary';
             }
         }
 
